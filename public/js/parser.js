@@ -14,7 +14,8 @@ const ALIASES = {
   subsector: ['subsector', 'industry'],
   qty: ['quantity', 'qty', 'shares', 'units', 'position'],
   avgCost: ['avgcost', 'averagecost', 'costprice', 'unitcost'],
-  price: ['price', 'pmsprice', 'tradeprice', 'marketprice', 'closeprice'],
+  price: ['price', 'pmsprice', 'tradeprice', 'marketprice', 'closeprice', 'close', 'closingprice', 'lastprice'],
+  adj: ['adjclose', 'adjustedclose', 'totalreturnprice', 'adjustedprice'],
   mv: ['marketvalue', 'marketvaluephp', 'mv', 'value'],
   type: ['type', 'transactiontype', 'txntype'],
   fees: ['fees', 'charges', 'commission', 'feesandtaxes'],
@@ -219,6 +220,18 @@ export function parseWorkbook(wb) {
   const O = readTable(wb, ['Price_Override', 'Price_Overrides'], ['date', 'ticker', 'price'], ['date', 'ticker', 'price'], ctx) || [];
   const overrides = O.map((r) => ({ date: excelDate(r.date), ticker: cleanTicker(r.ticker), price: num(r.price) })).filter((o) => o.date && o.ticker && o.price > 0);
 
+  // ---- Price history from the PMS (optional; overrides fetched prices for the tickers it covers)
+  const PH = readTable(wb, ['Price_History', 'PriceHistory', 'Prices'], ['date', 'ticker', 'price', 'adj'], ['date', 'ticker', 'price'], ctx) || [];
+  const priceHistory = [];
+  let badPx = 0;
+  for (const r of PH) {
+    const date = excelDate(r.date), ticker = cleanTicker(r.ticker), close = num(r.price), adj = num(r.adj);
+    if (!date && !ticker) continue;
+    if (!date || !ticker || !(close > 0)) { badPx++; continue; }
+    priceHistory.push({ date, ticker, close, adj: adj > 0 ? adj : null });
+  }
+  if (badPx) ctx.warnings.push(`Price_History: ${badPx} row(s) skipped (missing date, ticker or a positive close).`);
+
   if (!holdings.length && H) ctx.errors.push('Holdings sheet has no valid rows.');
-  return { config, holdings, transactions, cashFlows, benchmark, scenarios, overrides, errors: ctx.errors, warnings: ctx.warnings };
+  return { config, holdings, transactions, cashFlows, benchmark, scenarios, overrides, priceHistory, errors: ctx.errors, warnings: ctx.warnings };
 }

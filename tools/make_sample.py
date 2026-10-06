@@ -61,7 +61,7 @@ ws.column_dimensions["B"].width = 110
 ws["A1"] = "PSE Portfolio Analytics — input workbook"
 ws["A1"].font = TITLE
 ws["A2"] = ("Upload this workbook (exported from the PMS) to the app. Prices are fetched automatically from Yahoo Finance "
-            "using the PSE ticker + '.PS' (e.g. BDO -> BDO.PS); the benchmark index uses PSEI.PS.")
+            "(EODHD for PSE stocks when the server has an API key; Yahoo Finance for the PSEi index), or read from the Price_History sheet.")
 ws["A2"].font = TEXT
 ws["A3"] = ("ALL VALUES IN THIS SAMPLE ARE ILLUSTRATIVE (quantities, costs, fees, flows, benchmark weights and sector labels). "
             "Replace them with your PMS data and official PSE index weights before use.")
@@ -78,7 +78,8 @@ info = [
     ("Cash_Flows", "External client money only (subscriptions/contributions and redemptions/withdrawals). Amount positive; Type decides the sign. Needed for correct time-weighted return."),
     ("Benchmark_Constituents", "Index members, PSE sector and weight at Period_Start, for sector attribution. Sector labels must match those used in Holdings. Weights in % or decimals; they are normalised to 100%."),
     ("Stress_Scenarios", "Optional. HISTORICAL rows replay actual returns between Start_Date and End_Date. SHOCK rows apply Shock_% to ALL, a sector name, or a single ticker."),
-    ("Price_Override", "Optional. Manual prices (suspended / illiquid / delisted names). Overrides Yahoo on that date."),
+    ("Price_History", "Daily closing prices from the PMS (Date, PSE_Ticker, Close, optional Adj_Close). Yahoo Finance no longer carries Philippine stocks, so supply this sheet unless the server has an EODHD API key. Use ticker PSEI for the index if you also want to supply it."),
+    ("Price_Override", "Optional. Manual prices for single dates (suspended / illiquid names). Overrides every other source on that date."),
     ("Colour code", "Dark-blue headers = required columns; mid-blue = optional. Blue text = input values. Hover a header for its definition."),
 ]
 for i, (a, b) in enumerate(info, start=5):
@@ -302,6 +303,18 @@ dv = DataValidation(type="list", formula1='"HISTORICAL,SHOCK"', allow_blank=Fals
 ws.add_data_validation(dv)
 dv.add("B2:B500")
 notes(ws, len(S) + 3, ["Historical windows are examples; stocks not listed at the time are proxied with the index move."])
+
+# ------------------------------------------------------------------ Price_History
+ws = wb.create_sheet("Price_History")
+header(ws, 1, [("Date", 13, "Trading date"), ("PSE_Ticker", 12, "Stock code; use PSEI for the index"),
+               ("Close", 12, "Closing price, PHP"), ("Adj_Close", 12, "Optional: dividend/split-adjusted close (used for VaR returns)")],
+       required=("Date", "PSE_Ticker", "Close"))
+notes(ws, 3, [
+    "Optional, but needed for PSE stocks unless the server has an EODHD API key: Yahoo Finance no longer carries Philippine stocks.",
+    "Export daily closing prices from the PMS for every holding and benchmark member, about 3 years back from Valuation_Date (VaR lookback + backtest).",
+    "Long format, one row per ticker per date. Tickers listed here are not fetched online. When prices come from this sheet, dividends must be entered as DIVIDEND rows in Transactions.",
+    "Delete these note rows (or leave them: rows without a date and ticker are ignored).",
+])
 
 # ------------------------------------------------------------------ Price_Override
 ws = wb.create_sheet("Price_Override")

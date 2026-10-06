@@ -19,17 +19,23 @@ export async function fetchPrices(model, onProgress) {
   for (const s of scenarios) if (s.type === 'HISTORICAL' && s.start < from) from = addDays(s.start, -10);
   const to = config.periodEnd > config.valuationDate ? config.periodEnd : config.valuationDate;
 
-  const list = [...symbols];
+  // Prices supplied in the workbook (Price_History) take precedence over any fetched source.
   const data = {}, errors = {}; let mode = 'live';
+  const local = buildLocalPrices(model, yahooOf);
+  for (const [sym, d] of Object.entries(local)) { data[sym] = d; symbols.delete(sym); }
+  const localCount = Object.keys(local).length;
+  if (localCount) onProgress && onProgress(`Using Price_History from the workbook for ${localCount} symbol(s)…`);
+  const list = [...symbols];
   const BATCH = 6; // small requests stay inside serverless time limits (Vercel, Netlify)
   if (typeof window !== 'undefined' && window.PSE_PRICE_PROVIDER) { // browser-only build
     onProgress && onProgress(`Generating demo prices for ${list.length} symbols…`);
     const j = await window.PSE_PRICE_PROVIDER(list, from, to);
-    return { data: j.data, errors: j.errors, mode: j.mode, from, to, yahooOf };
+    return { data: { ...j.data, ...data }, errors: j.errors, mode: localCount && !list.length ? 'workbook' : j.mode, from, to, yahooOf, localCount };
   }
+  if (!list.length) return { data, errors, mode: 'workbook', from, to, yahooOf, localCount };
   for (let i = 0; i < list.length; i += BATCH) {
     const chunk = list.slice(i, i + BATCH);
-    onProgress && onProgress(`Fetching prices ${i + 1}–${Math.min(i + BATCH, list.length)} of ${list.length} from Yahoo Finance…`);
+    onProgress && onProgress(`Fetching prices ${i + 1}–${Math.min(i + BATCH, list.length)} of ${list.length} from the price server…`);
     const res = await fetch('/api/history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbols: chunk, from, to }) });
     if (!res.ok) {
       if (res.status === 504 || res.status === 408) throw new Error('The price server timed out. Click Generate reports again: prices already fetched are cached, so the next try is faster.');
@@ -40,7 +46,26 @@ export async function fetchPrices(model, onProgress) {
     const j = await res.json();
     Object.assign(data, j.data); Object.assign(errors, j.errors); mode = j.mode;
   }
-  return { data, errors, mode, from, to, yahooOf };
+  return { data, errors, mode, from, to, yahooOf, localCount };
+}
+
+// Price_History rows -> the same shape the server returns, keyed by Yahoo-style symbol.
+// Ticker PSEI (or the benchmark symbol without .PS) maps to the benchmark index.
+function buildLocalPrices(model, yahooOf) {
+  const { priceHistory = [], config } = model;
+  if (!priceHistory.length) return {};
+  const idxTicker = config.benchmarkSymbol.replace(/\.PS$/, '').replace(/^\^/, '');
+  const by = {};
+  for (const r of priceHistory) {
+    const sym = r.ticker === 'PSEI' || r.ticker === idxTicker ? config.benchmarkSymbol : (yahooOf[r.ticker] || `${r.ticker}.PS`);
+    (by[sym] ||= new Map()).set(r.date, r); // last row wins for duplicate dates
+  }
+  const out = {};
+  for (const [sym, m] of Object.entries(by)) {
+    const rows = [...m.values()].sort((a, b) => a.date.localeCompare(b.date));
+    out[sym] = { dates: rows.map((r) => r.date), close: rows.map((r) => r.close), adjclose: rows.map((r) => r.adj ?? r.close), volume: [], dividends: [], splits: [], name: sym, source: 'workbook' };
+  }
+  return out;
 }
 
 // Align every symbol on the benchmark's trading calendar with limited forward-fill.
@@ -275,6 +300,8 @@ export function dataQuality(model, panel, fetched, book) {
     else if (obs < window * 0.6) { status = 'SHORT'; note = `Only ${obs} of ${window} days — VaR uses the benchmark as proxy for missing days`; }
     else if (obs < window * 0.95) { status = 'GAPS'; note = `${window - obs} missing days forward-filled or proxied`; }
     if (s.override) note += (note ? '; ' : '') + 'manual price override applied';
+    const fd = fetched.data[yahoo]; const src = fd && (fd.source === 'workbook' ? 'workbook' : fd.provider || fd.source);
+    if (src) note = `[${src === 'workbook' ? 'Price_History sheet' : src === 'eodhd' ? 'EODHD' : src === 'demo' ? 'demo' : 'Yahoo'}] ` + note;
     rows.push({ ticker, yahoo, role, status, note, obs, window, first: s.firstDate, last: s.lastDate, lastPx });
   };
   const held = book && book.tickers ? book.tickers : [];

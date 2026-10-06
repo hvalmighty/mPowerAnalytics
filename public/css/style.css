@@ -62,6 +62,7 @@ a { color: var(--accent); }
 .top-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .badge { font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border); }
 .badge.live { background: var(--ok-bg); color: var(--ok-ink); border-color: transparent; }
+.badge.warnb { background: var(--warn-bg); color: var(--warn-ink); border-color: transparent; font-weight: 600; }
 .badge.demo { background: var(--err-bg); color: var(--err-ink); border-color: transparent; font-weight: 600; }
 .demo-banner { background: var(--err-bg); color: var(--err-ink); padding: 10px 28px; font-size: 13px; font-weight: 500; }
 

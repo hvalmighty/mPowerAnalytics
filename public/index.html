@@ -47,9 +47,10 @@
             <li><b>Transactions</b> buys, sells, dividends, fees in the period</li>
             <li><b>Cash_Flows</b> client contributions and withdrawals</li>
             <li><b>Benchmark_Constituents</b> PSEi members, sectors, weights (for attribution)</li>
+            <li><b>Price_History</b> daily closes from the PMS (needed for PSE stocks unless the server has an EODHD key)</li>
             <li><b>Stress_Scenarios</b>, <b>Price_Override</b> optional</li>
           </ul>
-          <p class="muted">Prices are fetched from Yahoo Finance (ticker + <code>.PS</code>) for every holding and benchmark member.</p>
+          <p class="muted">Stock prices come from the Price_History sheet or from EODHD; the PSEi index comes from Yahoo Finance. Yahoo no longer carries individual Philippine stocks.</p>
           <div class="row">
             <button id="btnRun" class="btn primary" disabled>Generate reports</button>
             <button id="btnSample" class="btn">Run with sample portfolio</button>
@@ -82,7 +83,7 @@
     </section>
   </main>
 
-  <footer class="foot">Market data: Yahoo Finance (unofficial; for internal analysis — verify against your PMS and licensed sources before client reporting).</footer>
+  <footer class="foot">Market data: your Price_History sheet, EODHD and Yahoo Finance (index). For internal analysis; verify against your PMS before client reporting.</footer>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

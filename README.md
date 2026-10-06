@@ -52,13 +52,20 @@ docker run -d -p 3000:3000 --name pse-analytics pse-analytics
 
 `npm run build-hosted` writes `dist/pse-portfolio-analytics.html`. It is a self-contained page with synthetic prices and the sample workbook embedded, and it needs no server, so it is useful for demos. It cannot fetch real prices, because browsers block calls to Yahoo from a web page.
 
-## How prices are fetched
+## Where prices come from
 
-- Each PSE ticker in Holdings, Transactions and Benchmark_Constituents is mapped to Yahoo as `TICKER.PS` (BDO → `BDO.PS`). Any listed PSE stock works the same way. To use a different Yahoo symbol, add a `Yahoo_Symbol` column.
-- The benchmark index is `PSEI.PS`; you can change it in Portfolio_Info.
-- The server (`server.js`) calls Yahoo's v8 chart endpoint and caches each symbol in `cache/`. Later runs only re-download recent data. The browser never calls Yahoo directly, because CORS restrictions would block it.
-- Valuation uses Yahoo's close, which is split-adjusted but not dividend-adjusted. Dividends are credited as cash on the ex-date. VaR returns use the dividend-adjusted close.
-- History fetched covers the VaR lookback plus the backtest window (about 3 years with the defaults), plus any historical stress windows you list (the sample includes 2008 and 2020).
+**Yahoo Finance no longer carries individual Philippine stocks.** Requests for symbols like `BDO.PS` come back "No data found". Only the PSEi index (`PSEI.PS`) is still available there. So stock prices come from one of these, in order of precedence:
+
+1. **Price_History sheet in the workbook** (free). Daily closes exported from your PMS: `Date, PSE_Ticker, Close`, optional `Adj_Close`. Use ticker `PSEI` to supply the index too. Tickers in this sheet are never fetched online. Cover about 3 years before Valuation_Date (VaR lookback + backtest). Enter dividends as `DIVIDEND` rows in Transactions.
+2. **EODHD** (https://eodhd.com, paid, from about USD 20/month for end-of-day data). Set the environment variable `EODHD_API_KEY` on the server (on Vercel: Project → Settings → Environment Variables, then redeploy). Stocks are requested as `TICKER.PSE`, with cash dividends included. Each stock uses two API calls per fetch, so the free tier (20 calls/day) is not enough for a real portfolio.
+3. **Yahoo Finance** for the PSEi index (`PSEI.PS`), and as a fallback for any symbol the other sources miss.
+
+The badge at the top right shows what the server is set up for. The Data Quality tab shows the source used for each symbol.
+
+Other details:
+- The server caches each symbol in `cache/` (`/tmp` on Vercel), so later runs only fetch recent data. The browser never calls a price provider directly.
+- Valuation uses the unadjusted close, with dividends credited as cash on the ex-date. VaR returns use the adjusted close when one is available.
+- History fetched covers the VaR lookback plus the backtest window (about 3 years with the defaults), plus any historical stress windows you list.
 
 ## Input workbook
 
@@ -70,6 +77,7 @@ docker run -d -p 3000:3000 --name pse-analytics pse-analytics
 | Cash_Flows | if the client added or withdrew money | Date, Amount, Type (Contribution / Withdrawal) |
 | Benchmark_Constituents | for attribution | PSE_Ticker, Sector, Weight at Period_Start |
 | Stress_Scenarios | optional | HISTORICAL rows (Start_Date to End_Date) or SHOCK rows (Target = ALL, a sector, or a ticker; Shock_%) |
+| Price_History | for PSE stocks, unless EODHD is set up | Date, PSE_Ticker, Close, optional Adj_Close (daily closes from the PMS) |
 | Price_Override | optional | Manual prices for suspended or illiquid names |
 
 How positions are built:
@@ -93,7 +101,7 @@ Column headers are matched loosely, so for example `Ticker`, `Symbol` or `Stock 
 
 ## Limitations to know about
 
-- **Yahoo Finance is unofficial.** There is no SLA, and Yahoo can rate-limit, change the endpoint, or have gaps for thinly traded PSE names. Its terms restrict commercial redistribution. Use it for internal analysis, and use a licensed feed or your PMS prices for client reporting.
+- **Yahoo Finance is unofficial** and is now used only for the PSEi index. For client reporting, prefer your PMS prices (Price_History) or a licensed feed such as EODHD.
 - **PSEi is a price index.** A portfolio that receives dividends has a small structural edge over it. Set `Benchmark_Return_Type = TOTAL` to use dividend-adjusted constituent prices in attribution.
 - **Stock splits and stock dividends** inside the period: Yahoo back-adjusts prices. Record the share change as `STOCK_DIVIDEND`; the app warns when Yahoo reports a split on a stock you hold.
 - **Currency:** PHP only. No FX conversion and no FX risk.

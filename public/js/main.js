@@ -24,7 +24,8 @@ if (HOSTED) {
 else fetch('/api/status').then((r) => r.json()).then((s) => {
   const b = $('modeBadge');
   if (s.mode === 'demo') demoBadge();
-  else { b.textContent = 'Live: Yahoo Finance'; b.className = 'badge live'; }
+  else if (s.stockSource === 'eodhd') { b.textContent = 'Live: EODHD stocks · Yahoo index'; b.className = 'badge live'; b.title = 'PSE stock prices from EODHD; PSEi index from Yahoo Finance'; }
+  else { b.textContent = 'Stocks: needs Price_History or EODHD'; b.className = 'badge warnb'; b.title = 'Yahoo Finance no longer carries Philippine stocks. Add a Price_History sheet to the workbook, or set EODHD_API_KEY on the server. The PSEi index still comes from Yahoo.'; }
 }).catch(() => { $('modeBadge').textContent = 'Price server offline'; });
 
 // ---- sample workbook
@@ -94,7 +95,9 @@ async function run() {
     const progress = say('Fetching prices…');
     const fetched = await fetchPrices(model, (t) => (progress.textContent = t));
     const nOk = Object.keys(fetched.data).length, nErr = Object.keys(fetched.errors).length;
-    progress.textContent = `Prices: ${nOk} symbols loaded (${fetched.from} → ${fetched.to})${nErr ? `, ${nErr} failed` : ''}${fetched.mode === 'demo' ? ' — DEMO synthetic data' : ''}.`;
+    progress.textContent = `Prices: ${nOk} symbols loaded (${fetched.from} → ${fetched.to})${fetched.localCount ? `, ${fetched.localCount} from the Price_History sheet` : ''}${nErr ? `, ${nErr} failed` : ''}${fetched.mode === 'demo' ? ' — DEMO synthetic data' : ''}.`;
+    if (nErr && Object.values(fetched.errors).some((e) => /no longer carries/i.test(e)))
+      say('Yahoo Finance no longer provides Philippine stock prices. Add a Price_History sheet (Date, PSE_Ticker, Close) exported from your PMS, or ask your administrator to set an EODHD API key on the server.', 'err');
     progress.className = nErr ? 'warn' : 'ok';
     for (const [s, e] of Object.entries(fetched.errors)) say(`${s}: ${e}`, 'warn');
 

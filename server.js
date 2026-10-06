@@ -1,9 +1,14 @@
 // PSE Portfolio Risk & Performance — backend
-// Serves the browser app and fetches daily price history from Yahoo Finance
-// for Philippine Stock Exchange tickers (Yahoo suffix ".PS"), with a file cache.
+// Serves the browser app and fetches daily price history, with a file cache.
 //
-//   npm start            -> live Yahoo Finance data
-//   DEMO=1 npm start     -> synthetic prices (offline testing only, clearly flagged in the UI)
+// Price sources (in order):
+//   1. EODHD (https://eodhd.com) for PSE stocks, when EODHD_API_KEY is set.
+//      Yahoo Finance no longer carries individual Philippine stocks.
+//   2. Yahoo Finance: the PSEi index (PSEI.PS) and any symbol EODHD cannot supply.
+//   (A Price_History sheet in the uploaded workbook overrides both, in the browser.)
+//
+//   npm start            -> live data
+//   npm run demo         -> synthetic prices (offline testing only, clearly flagged in the UI)
 
 const express = require('express');
 const path = require('path');
@@ -17,6 +22,9 @@ const SERVERLESS = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
 const CACHE_DIR = process.env.CACHE_DIR || (SERVERLESS ? '/tmp/pse-cache' : path.join(__dirname, 'cache'));
 const CACHE_TTL_HOURS = Number(process.env.CACHE_TTL_HOURS || 12);
 const CONCURRENCY = Number(process.env.YAHOO_CONCURRENCY || 3);
+const EODHD_KEY = (process.env.EODHD_API_KEY || '').trim();
+const EODHD_EXCHANGE = process.env.EODHD_EXCHANGE || 'PSE';
+const EODHD_DIVIDENDS = process.env.EODHD_DIVIDENDS !== '0';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 
 let cacheOk = true;
@@ -30,6 +38,40 @@ app.use(express.static(path.join(__dirname, 'public')));
 const toUnix = (d) => Math.floor(new Date(d + 'T00:00:00Z').getTime() / 1000);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SYMBOL_RE = /^[A-Z0-9^.\-=]{1,20}$/;
+
+// ---------- EODHD end-of-day API ----------
+// Our symbols use the Yahoo form (BDO.PS); EODHD uses BDO.PSE.
+const toEodhd = (symbol) => symbol.replace(/\.PS$/, '.' + EODHD_EXCHANGE);
+const useEodhd = (symbol) => !!EODHD_KEY && /\.PS$/.test(symbol) && !/^PSEI\./.test(symbol) && !symbol.startsWith('^');
+
+async function eodhdGet(pathAndQuery) {
+  const url = `https://eodhd.com/api/${pathAndQuery}${pathAndQuery.includes('?') ? '&' : '?'}api_token=${encodeURIComponent(EODHD_KEY)}&fmt=json`;
+  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  const text = await res.text();
+  if (res.status === 401 || res.status === 403) throw new Error('EODHD rejected the API key (check EODHD_API_KEY)');
+  if (res.status === 402 || res.status === 429) throw new Error('EODHD daily request limit reached for this API key');
+  if (res.status === 404) throw new Error('EODHD has no data for this ticker');
+  if (!res.ok) throw new Error(`EODHD HTTP ${res.status}: ${text.slice(0, 120)}`);
+  try { return JSON.parse(text); } catch { throw new Error('EODHD returned an unexpected response: ' + text.slice(0, 120)); }
+}
+
+async function fetchEodhd(symbol, from, to) {
+  const t = encodeURIComponent(toEodhd(symbol));
+  const rows = await eodhdGet(`eod/${t}?from=${from}&to=${to}&period=d`);
+  if (!Array.isArray(rows) || !rows.length) throw new Error('EODHD returned no prices for this ticker and period');
+  const out = { dates: [], close: [], adjclose: [], volume: [], dividends: [], splits: [], currency: 'PHP', name: toEodhd(symbol), provider: 'eodhd' };
+  for (const r of rows) {
+    if (r.close == null || !isFinite(r.close)) continue;
+    out.dates.push(r.date); out.close.push(r.close); out.adjclose.push(r.adjusted_close ?? r.close); out.volume.push(r.volume ?? null);
+  }
+  if (EODHD_DIVIDENDS) {
+    try {
+      const divs = await eodhdGet(`div/${t}?from=${from}&to=${to}`);
+      if (Array.isArray(divs)) for (const d of divs) { const v = d.unadjustedValue ?? d.value; if (d.date && v > 0) out.dividends.push({ date: d.date, amount: v }); }
+    } catch (e) { console.warn(`EODHD dividends for ${symbol}:`, e.message); }
+  }
+  return out;
+}
 
 // ---------- Yahoo Finance v8 chart endpoint ----------
 async function fetchYahoo(symbol, from, to) {
@@ -106,13 +148,27 @@ async function getHistory(symbol, from, to) {
   const c = readCache(symbol);
   if (c && cacheCovers(c, from, to)) return { ...slice(c.data, from, to), source: 'cache' };
   const fFrom = c && c.from < from ? c.from : from;
-  const data = await fetchYahoo(symbol, fFrom, to);
+  let data;
+  if (useEodhd(symbol)) {
+    try { data = await fetchEodhd(symbol, fFrom, to); }
+    catch (e) {
+      try { data = await fetchYahoo(symbol, fFrom, to); data.provider = 'yahoo'; }
+      catch { throw e; } // report the EODHD reason: it is the source that should have worked
+    }
+  } else {
+    try { data = await fetchYahoo(symbol, fFrom, to); data.provider = 'yahoo'; }
+    catch (e) {
+      if (/No data found|delisted|Not Found/i.test(e.message) && /\.PS$/.test(symbol) && !/^PSEI\./.test(symbol))
+        throw new Error('Yahoo Finance no longer carries Philippine stocks. Add a Price_History sheet to the workbook, or set EODHD_API_KEY on the server.');
+      throw e;
+    }
+  }
   const lastDate = data.dates[data.dates.length - 1] || fFrom;
   if (cacheOk) {
     try { fs.writeFileSync(cacheFile(symbol), JSON.stringify({ from: fFrom, to: lastDate < to ? lastDate : to, fetchedAt: Date.now(), data })); }
     catch (e) { console.warn('Cache write failed:', e.message); }
   }
-  return { ...slice(data, from, to), source: 'yahoo' };
+  return { ...slice(data, from, to), source: data.provider || 'yahoo' };
 }
 
 function slice(d, from, to) {
@@ -152,9 +208,9 @@ app.post('/api/history', async (req, res) => {
 
 // Vercel and other serverless hosts import this file and expect the Express app as the export.
 module.exports = app;
-Object.assign(module.exports, { parseChart, slice, start });
+Object.assign(module.exports, { parseChart, slice, start, fetchEodhd, getHistory });
 
-app.get('/api/status', (req, res) => res.json({ mode: DEMO ? 'demo' : 'live' }));
+app.get('/api/status', (req, res) => res.json({ mode: DEMO ? 'demo' : 'live', stockSource: DEMO ? 'demo' : EODHD_KEY ? 'eodhd' : 'yahoo', indexSource: 'yahoo' }));
 app.get('/healthz', (req, res) => res.send('ok'));
 
 function start() {
