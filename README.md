@@ -9,24 +9,48 @@ A JavaScript app that reads a PMS export in Excel for a Philippine-listed equity
 
 Every report can be exported to Excel (13 sheets, including daily NAV) or printed to PDF.
 
-## Run it
+## Run it on your own computer (best way to test with real prices)
 
-Requires Node.js 18 or later and internet access to `query1/query2.finance.yahoo.com`.
+1. Install **Node.js LTS** from https://nodejs.org (one-time).
+2. Unzip this folder.
+3. Double-click **start-windows.bat** (Windows) or **start-mac.command** (Mac). The first run installs packages, then opens http://localhost:3000.
+4. Click **Run with sample portfolio**, or upload your PMS export and click **Generate reports**.
 
-```bash
-npm install
-npm start            # http://localhost:3000  (live Yahoo Finance prices)
-```
-
-Open the page, click **Download sample workbook**, then upload it (or your own PMS export) and click **Generate reports**.
-
-```bash
-npm run demo         # offline mode with SYNTHETIC prices, for testing only
-```
-
-Demo mode shows a red banner and badge. Its prices are generated and are not market data.
+From a terminal the same thing is `npm install` then `npm start`. Use `npm run demo` for synthetic prices with no internet (a red banner says so).
 
 Optional environment variables: `PORT`, `CACHE_TTL_HOURS` (default 12), `YAHOO_CONCURRENCY` (default 3).
+
+## Host it so others can use it
+
+The app is one small Node.js server, so any Node host works. Two easy routes:
+
+**Render.com (free tier)**
+1. Create a GitHub repository and upload the contents of this folder (GitHub's "Add file → Upload files" works; skip `node_modules`).
+2. On https://render.com, sign in with GitHub, then **New + → Blueprint** and pick the repository. `render.yaml` sets everything up.
+3. When the build finishes, Render gives you a URL such as `https://pse-portfolio-analytics.onrender.com`.
+
+The free tier sleeps after 15 minutes idle, so the first request takes about a minute. Its disk is temporary, so the price cache resets on each restart.
+
+**Vercel**
+1. Push this folder to GitHub with `server.js`, `package.json` and `vercel.json` at the repository root, not inside a subfolder.
+2. On vercel.com choose **Add New → Project**, import the repository, and keep the defaults (Framework: Other). If the files sit in a subfolder, set **Root Directory** to that folder.
+3. Deploy, then open `https://<your-app>.vercel.app/healthz`. It should show `ok`.
+
+On Vercel the server runs as a serverless function: the price cache lives in `/tmp` and is lost between cold starts. The browser asks for prices in small batches to stay within Vercel's time limit.
+
+**Any server with Docker** (a company VM, AWS Lightsail, Azure App Service, Google Cloud Run):
+```bash
+docker build -t pse-analytics .
+docker run -d -p 3000:3000 --name pse-analytics pse-analytics
+```
+
+**Before hosting, check:**
+- **Yahoo and cloud servers.** Yahoo sometimes rate-limits or blocks requests from cloud data centres. If prices fail on the hosted copy but work on your computer, that is the cause. Run it on an office machine, or switch to a licensed data feed.
+- **No login.** The app has no sign-in. Anyone with the URL can use it. Uploaded files are processed in the user's browser and never stored on the server, but put it behind your company's access control (VPN, SSO proxy, or Render's IP allow-list on paid plans) before using real client data.
+
+## Single-file test build
+
+`npm run build-hosted` writes `dist/pse-portfolio-analytics.html`. It is a self-contained page with synthetic prices and the sample workbook embedded, and it needs no server, so it is useful for demos. It cannot fetch real prices, because browsers block calls to Yahoo from a web page.
 
 ## How prices are fetched
 
@@ -80,8 +104,13 @@ Column headers are matched loosely, so for example `Ticker`, `Symbol` or `Stock 
 
 ```
 server.js              Express server, Yahoo fetch + file cache, /api/history
-lib/demo.js            synthetic price generator (DEMO=1 only)
+demo.js                starts the server with synthetic prices
+public/js/demo-prices.mjs  synthetic price generator (demo mode and test build)
+Dockerfile, render.yaml, vercel.json    hosting
+start-windows.bat, start-mac.command  double-click launchers
+tools/build_hosted.mjs single-file test build
 public/index.html      UI
+public/vendor/         SheetJS and Chart.js (copied from node_modules by `npm run vendor`)
 public/js/parser.js    Excel → data model, validation
 public/js/data.js      price alignment, daily book (positions, cash, P&L), data quality
 public/js/risk.js      VaR / ES / decomposition / stress / backtest

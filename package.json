@@ -5,8 +5,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "demo": "DEMO=1 node server.js",
-    "make-sample": "python3 tools/make_sample.py"
+    "demo": "node demo.js",
+    "make-sample": "python3 tools/make_sample.py",
+    "build-hosted": "node tools/build_hosted.mjs",
+    "vendor": "node -e \"const fs=require('fs');fs.mkdirSync('public/vendor/xlsx',{recursive:true});fs.mkdirSync('public/vendor/chartjs',{recursive:true});fs.copyFileSync('node_modules/xlsx/dist/xlsx.full.min.js','public/vendor/xlsx/xlsx.full.min.js');fs.copyFileSync('node_modules/chart.js/dist/chart.umd.js','public/vendor/chartjs/chart.umd.js')\""
   },
   "keywords": [],
   "author": "",
@@ -18,5 +20,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }

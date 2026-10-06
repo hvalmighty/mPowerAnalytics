@@ -1,0 +1,9 @@
+# Render.com blueprint: New + > Blueprint > pick this repo.
+services:
+  - type: web
+    name: pse-portfolio-analytics
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: node server.js
+    healthCheckPath: /healthz

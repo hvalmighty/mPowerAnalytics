@@ -8,22 +8,24 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
-const { demoHistory } = require('./lib/demo');
+let demoHistory; // loaded only in DEMO mode (ES module shared with the browser build)
 
 const PORT = process.env.PORT || 3000;
 const DEMO = process.env.DEMO === '1';
-const CACHE_DIR = path.join(__dirname, 'cache');
+// Serverless hosts (Vercel, Netlify, Lambda) only allow writes under /tmp.
+const SERVERLESS = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY);
+const CACHE_DIR = process.env.CACHE_DIR || (SERVERLESS ? '/tmp/pse-cache' : path.join(__dirname, 'cache'));
 const CACHE_TTL_HOURS = Number(process.env.CACHE_TTL_HOURS || 12);
 const CONCURRENCY = Number(process.env.YAHOO_CONCURRENCY || 3);
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 
-if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
+let cacheOk = true;
+try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch (e) { cacheOk = false; console.warn('Price cache disabled:', e.message); }
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/vendor/xlsx', express.static(path.join(__dirname, 'node_modules/xlsx/dist')));
-app.use('/vendor/chartjs', express.static(path.join(__dirname, 'node_modules/chart.js/dist')));
+// Browser libraries live in public/vendor (copied by `npm run vendor`) so static hosts serve them too.
 
 const toUnix = (d) => Math.floor(new Date(d + 'T00:00:00Z').getTime() / 1000);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -85,6 +87,7 @@ function parseChart(r) {
 // ---------- cache ----------
 const cacheFile = (s) => path.join(CACHE_DIR, s.replace(/[^A-Za-z0-9_.\-]/g, '_') + '.json');
 function readCache(symbol) {
+  if (!cacheOk) return null;
   try { return JSON.parse(fs.readFileSync(cacheFile(symbol), 'utf8')); } catch { return null; }
 }
 function cacheCovers(c, from, to) {
@@ -96,13 +99,19 @@ function cacheCovers(c, from, to) {
 }
 
 async function getHistory(symbol, from, to) {
-  if (DEMO) return { ...demoHistory(symbol, from, to), source: 'demo' };
+  if (DEMO) {
+    if (!demoHistory) ({ demoHistory } = await import('./public/js/demo-prices.mjs'));
+    return { ...demoHistory(symbol, from, to), source: 'demo' };
+  }
   const c = readCache(symbol);
   if (c && cacheCovers(c, from, to)) return { ...slice(c.data, from, to), source: 'cache' };
   const fFrom = c && c.from < from ? c.from : from;
   const data = await fetchYahoo(symbol, fFrom, to);
   const lastDate = data.dates[data.dates.length - 1] || fFrom;
-  fs.writeFileSync(cacheFile(symbol), JSON.stringify({ from: fFrom, to: lastDate < to ? lastDate : to, fetchedAt: Date.now(), data }));
+  if (cacheOk) {
+    try { fs.writeFileSync(cacheFile(symbol), JSON.stringify({ from: fFrom, to: lastDate < to ? lastDate : to, fetchedAt: Date.now(), data })); }
+    catch (e) { console.warn('Cache write failed:', e.message); }
+  }
   return { ...slice(data, from, to), source: 'yahoo' };
 }
 
@@ -141,10 +150,16 @@ app.post('/api/history', async (req, res) => {
   res.json({ mode: DEMO ? 'demo' : 'live', data, errors });
 });
 
-module.exports = { parseChart, slice };
+// Vercel and other serverless hosts import this file and expect the Express app as the export.
+module.exports = app;
+Object.assign(module.exports, { parseChart, slice, start });
 
 app.get('/api/status', (req, res) => res.json({ mode: DEMO ? 'demo' : 'live' }));
+app.get('/healthz', (req, res) => res.send('ok'));
 
-if (require.main === module) app.listen(PORT, () => {
+function start() {
+  return app.listen(PORT, () => {
   console.log(`PSE Portfolio Analytics running at http://localhost:${PORT}  [${DEMO ? 'DEMO synthetic data' : 'live Yahoo Finance data'}]`);
 });
+}
+if (require.main === module) start();
