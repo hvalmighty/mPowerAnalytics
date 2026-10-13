@@ -44,7 +44,7 @@
             <input type="file" id="filePx" accept=".xlsx,.xls,.xlsm,.csv" hidden>
             <span class="drop-step">2</span>
             <strong>Market prices</strong>
-            <span class="muted">Drop the PMS market price export, or click to choose</span>
+            <span class="muted" id="pxHint">Drop the PMS market price export, or click to choose</span>
             <span id="fileNamePx" class="file-name"></span>
           </label>
         </div>
@@ -52,7 +52,7 @@
           <h2>What to upload</h2>
           <ul class="sheet-list">
             <li><b>Portfolio</b> <span class="req">required</span> one row per holding: security code, quantity, and ideally sector. A <code>CASH</code> row for cash.</li>
-            <li><b>Market prices</b> <span class="req">required</span> the PMS price export as it comes: <code>security</code>, <code>effective_date</code>, <code>mkt_price</code>.</li>
+            <li><b>Market prices</b> built into the app (8 Oct 2025 – 8 Oct 2026). Drop a newer PMS price export in box 2 only when you want to update them.</li>
           </ul>
           <p class="muted">Optional sheets in the portfolio file add more: <b>Transactions</b> and <b>Cash_Flows</b> (exact performance when the portfolio changed), <b>Benchmark_Constituents</b> (sector attribution), <b>Portfolio_Info</b> (dates and VaR settings). Without them the app uses the full price period, treats holdings as unchanged, and compares against the PSEi.</p>
           <div class="row">

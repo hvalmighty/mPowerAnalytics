@@ -166,9 +166,13 @@ function readPrices(wb, ctx, anySheet, label) {
   return out;
 }
 
-export function parseWorkbook(wb, priceWb = null) {
+// builtin: price rows shipped with the app (public/data/market_prices.json), used when
+// neither an uploaded price file nor a Price_History sheet is given.
+export function parseWorkbook(wb, priceWb = null, builtin = null) {
   const ctx = { errors: [], warnings: [], info: [] };
-  const priceHistory = priceWb ? readPrices(priceWb, ctx, true, 'Market price file') : readPrices(wb, ctx, false, 'Price_History');
+  let priceHistory = priceWb ? readPrices(priceWb, ctx, true, 'Market price file') : readPrices(wb, ctx, false, 'Price_History');
+  const usedBuiltin = !priceWb && !priceHistory.length && !!(builtin && builtin.length);
+  if (usedBuiltin) priceHistory = builtin;
   let priceRange = null;
   if (priceHistory.length) {
     let min = priceHistory[0].date, max = min;
@@ -271,5 +275,5 @@ export function parseWorkbook(wb, priceWb = null) {
     if (!transactions.some((t) => t.type === 'DIVIDEND')) ctx.info.push('The price data has no dividends, so returns are price-only. Add DIVIDEND rows in Transactions to include them.');
   }
   if (holdings.length && holdings.every((h) => h.ticker === 'CASH' || h.sector === 'Unclassified')) ctx.info.push('No Sector column in the portfolio: risk by sector and attribution group everything as "Unclassified".');
-  return { config, holdings, transactions, cashFlows, benchmark, scenarios, overrides, priceHistory, priceRange, priceSource: priceWb ? 'file' : priceHistory.length ? 'sheet' : 'online', errors: ctx.errors, warnings: ctx.warnings, info: ctx.info };
+  return { config, holdings, transactions, cashFlows, benchmark, scenarios, overrides, priceHistory, priceRange, priceSource: priceWb || usedBuiltin ? 'file' : priceHistory.length ? 'sheet' : 'online', usedBuiltin, errors: ctx.errors, warnings: ctx.warnings, info: ctx.info };
 }

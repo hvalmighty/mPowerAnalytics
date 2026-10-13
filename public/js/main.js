@@ -6,11 +6,25 @@ import { computeAttribution } from './attribution.js';
 import { renderSummary, renderRisk, renderPerformance, renderAttribution, renderDQ, destroyCharts } from './report.js';
 
 const $ = (id) => document.getElementById(id);
-const log = $('log');
-let workbook = null, fileName = '', priceWb = null, priceFileName = '', ctx = null, serverMode = 'live';
 // PSE_HOSTED is set by the single-file build (tools/build_hosted.mjs): no server,
 // prices generated in the browser, files saved through the host's download prompt.
 const HOSTED = !!window.PSE_HOSTED;
+const log = $('log');
+let workbook = null, fileName = '', priceWb = null, priceFileName = '', ctx = null, serverMode = 'live';
+// Built-in prices (public/data/market_prices.json): used unless a newer price file is dropped in box 2.
+let builtin = null, builtinInfo = null;
+if (!HOSTED) fetch('/data/market_prices.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
+  if (!j || !j.dates) return;
+  const rows = [];
+  for (const [t, arr] of Object.entries(j.series)) arr.forEach((p, i) => { if (p > 0) rows.push({ date: j.dates[i], ticker: t, close: p, adj: null }); });
+  builtin = rows; builtinInfo = { n: Object.keys(j.series).length, from: j.from, to: j.to, source: j.source };
+  if (!priceWb) showBuiltin();
+}).catch(() => {});
+const fmtD = (d) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+function showBuiltin() {
+  $('fileNamePx').textContent = `Built in: ${builtinInfo.n} securities, ${fmtD(builtinInfo.from)} – ${fmtD(builtinInfo.to)}`;
+  $('pxHint').textContent = 'Optional: drop a newer price export to replace the built-in prices';
+}
 
 function say(text, cls = '') { const li = document.createElement('li'); li.textContent = text; if (cls) li.className = cls; log.appendChild(li); return li; }
 
@@ -41,7 +55,7 @@ async function sampleBytes() {
   return r.arrayBuffer();
 }
 $('btnSample').addEventListener('click', async () => {
-  if (!demoish() && !priceWb) { log.innerHTML = ''; say('Add the market price file first (box 2), then run the sample portfolio.', 'warn'); return; }
+  if (!demoish() && !priceWb && !builtin) { log.innerHTML = ''; say('Add the market price file first (box 2), then run the sample portfolio.', 'warn'); return; }
   await loadBuffer(await sampleBytes(), sampleName(), 'port');
   if (workbook) run();
 });
@@ -106,10 +120,10 @@ async function run() {
   if (!workbook) return;
   $('btnRun').disabled = true; log.innerHTML = '';
   try {
-    const model = parseWorkbook(workbook, priceWb);
+    const model = parseWorkbook(workbook, priceWb, demoish() ? null : builtin);
     if (!demoish() && !model.priceHistory.length) { say('No prices: add the market price file in box 2 (or a Price_History sheet in the portfolio file).', 'err'); return; }
     say(`Read ${model.holdings.length} holding rows${model.transactions.length ? `, ${model.transactions.length} transactions` : ''}${model.cashFlows.length ? `, ${model.cashFlows.length} cash flows` : ''}${model.benchmark.length ? `, ${model.benchmark.length} benchmark constituents` : ''}.`);
-    if (model.priceRange) say(`Prices: ${model.priceRange.securities} securities, ${model.priceRange.min} → ${model.priceRange.max}${priceWb ? ` from ${priceFileName}` : ' from the Price_History sheet'}.`);
+    if (model.priceRange) say(`Prices: ${model.priceRange.securities} securities, ${model.priceRange.min} → ${model.priceRange.max} ${priceWb ? `from ${priceFileName}` : model.usedBuiltin ? `(built-in, ${builtinInfo.source})` : 'from the Price_History sheet'}.`);
     model.info.forEach((w) => say(w));
     model.warnings.forEach((w) => say(w, 'warn'));
     if (model.errors.length) { model.errors.forEach((e) => say(e, 'err')); say('Fix the errors above and upload again.', 'err'); return; }
@@ -153,7 +167,7 @@ function render() {
   $('report').hidden = false;
   const title = c.hasInfoSheet ? c.name : fileName.replace(/\.[^.]+$/, '');
   $('rTitle').textContent = `${title}${c.id ? ' · ' + c.id : ''}`;
-  const src = ctx.fetched.mode === 'demo' ? 'DEMO synthetic prices' : ctx.model.priceSource === 'file' ? `prices: ${priceFileName}` : ctx.model.priceSource === 'sheet' ? 'prices: Price_History sheet' : 'prices: online';
+  const src = ctx.fetched.mode === 'demo' ? 'DEMO synthetic prices' : ctx.model.usedBuiltin ? `prices: built-in (${builtinInfo.from} → ${builtinInfo.to})` : ctx.model.priceSource === 'file' ? `prices: ${priceFileName}` : ctx.model.priceSource === 'sheet' ? 'prices: Price_History sheet' : 'prices: online';
   $('rMeta').textContent = `Period ${ctx.book.dates[0]} → ${ctx.book.dates[ctx.book.T - 1]} · valuation ${c.valuationDate} · benchmark ${c.benchmarkName} · ${src} · portfolio ${fileName}`;
   const issues = ctx.msgs.errors.length + ctx.msgs.warnings.length + ctx.dq.filter((d) => d.status !== 'OK').length;
   $('dqCount').textContent = issues ? String(issues) : '';
