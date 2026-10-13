@@ -5,16 +5,16 @@ const norm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 // Accepted header aliases per field
 const ALIASES = {
-  date: ['date', 'snapshotdate', 'asofdate', 'tradedate', 'valuedate'],
-  ticker: ['pseticker', 'ticker', 'symbol', 'stockcode', 'code', 'securitycode'],
+  date: ['date', 'snapshotdate', 'asofdate', 'tradedate', 'valuedate', 'effectivedate', 'pricedate', 'valuationdate', 'asof'],
+  ticker: ['pseticker', 'ticker', 'symbol', 'stockcode', 'code', 'securitycode', 'security', 'securityid', 'stock', 'secid'],
   yahoo: ['yahoosymbol', 'yahooticker'],
   isin: ['isin'],
   name: ['securityname', 'name', 'companyname', 'description'],
   sector: ['sector', 'psesector', 'industrygroup'],
   subsector: ['subsector', 'industry'],
-  qty: ['quantity', 'qty', 'shares', 'units', 'position'],
+  qty: ['quantity', 'qty', 'shares', 'units', 'position', 'noofshares', 'numberofshares', 'holdingqty', 'quantityheld'],
   avgCost: ['avgcost', 'averagecost', 'costprice', 'unitcost'],
-  price: ['price', 'pmsprice', 'tradeprice', 'marketprice', 'closeprice', 'close', 'closingprice', 'lastprice'],
+  price: ['price', 'pmsprice', 'tradeprice', 'marketprice', 'mktprice', 'closeprice', 'close', 'closingprice', 'lastprice'],
   adj: ['adjclose', 'adjustedclose', 'totalreturnprice', 'adjustedprice'],
   mv: ['marketvalue', 'marketvaluephp', 'mv', 'value'],
   type: ['type', 'transactiontype', 'txntype'],
@@ -65,8 +65,17 @@ function findSheet(wb, names) {
   return wb.SheetNames.find((n) => want.includes(norm(n)));
 }
 
-function readTable(wb, sheetNames, fields, required, ctx) {
-  const name = findSheet(wb, sheetNames);
+// Header row = first of the top 30 rows with every required field present.
+function headerRowWith(rows, required) {
+  return rows.slice(0, 30).findIndex((r) => r && required.every((f) => r.some((c) => ALIASES[f].includes(norm(c)))));
+}
+// Finds a sheet by name; with anySheet, falls back to the first sheet whose header has the required columns.
+function readTable(wb, sheetNames, fields, required, ctx, anySheet = false) {
+  let name = findSheet(wb, sheetNames);
+  if (!name && anySheet) {
+    const others = new Set(['transactions', 'trades', 'cashflows', 'flows', 'benchmarkconstituents', 'benchmark', 'indexconstituents', 'pricehistory', 'stressscenarios', 'scenarios', 'priceoverride', 'priceoverrides', 'instructions', 'portfolioinfo', 'config', 'settings'].filter((x) => !sheetNames.map(norm).includes(x)));
+    name = wb.SheetNames.filter((n) => !others.has(norm(n))).find((n) => headerRowWith(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null, blankrows: false, sheetRows: 30 }), required) >= 0);
+  }
   if (!name) return null;
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null, blankrows: false });
   // header = first row that contains at least 2 known aliases
@@ -88,10 +97,10 @@ function readTable(wb, sheetNames, fields, required, ctx) {
   return out;
 }
 
-function readConfig(wb, ctx) {
+// Portfolio_Info is optional: without it, dates come from the price data and every setting uses its default.
+function readConfig(wb, ctx, priceRange) {
   const name = findSheet(wb, ['Portfolio_Info', 'PortfolioInfo', 'Config', 'Settings']);
-  if (!name) { ctx.errors.push('Required sheet "Portfolio_Info" not found.'); return {}; }
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null });
+  const rows = name ? XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null }) : [];
   const kv = {};
   for (const r of rows) if (r && r[0] != null && r[1] != null && r[1] !== '') kv[norm(r[0])] = r[1];
   const g = (...keys) => { for (const k of keys) if (kv[norm(k)] != null) return kv[norm(k)]; return null; };
@@ -121,10 +130,17 @@ function readConfig(wb, ctx) {
     benchmarkReturnType: String(g('Benchmark_Return_Type') || 'PRICE').toUpperCase().startsWith('T') ? 'TOTAL' : 'PRICE',
     attributionGroup: (g('Attribution_Grouping') || 'Sector').toString(),
   };
+  cfg.hasInfoSheet = !!name;
   cfg.periodEnd = cfg.periodEnd || cfg.valuationDate;
   cfg.valuationDate = cfg.valuationDate || cfg.periodEnd;
-  if (!cfg.valuationDate) ctx.errors.push('Portfolio_Info: Valuation_Date is required.');
-  if (!cfg.periodStart) ctx.errors.push('Portfolio_Info: Period_Start is required.');
+  if (priceRange) {
+    const filled = [];
+    if (!cfg.valuationDate) { cfg.valuationDate = cfg.periodEnd = priceRange.max; filled.push(`valuation date ${priceRange.max} (latest price)`); }
+    if (!cfg.periodStart) { cfg.periodStart = priceRange.min; filled.push(`period start ${priceRange.min} (first price)`); }
+    if (filled.length) ctx.info.push(`Using ${filled.join(' and ')}. Add a Portfolio_Info sheet to set other dates.`);
+  }
+  if (!cfg.valuationDate) ctx.errors.push('No valuation date: add a Portfolio_Info sheet with Valuation_Date, or upload the market price file.');
+  if (!cfg.periodStart) ctx.errors.push('No period start: add Period_Start to Portfolio_Info, or upload the market price file.');
   if (cfg.periodStart && cfg.periodEnd && cfg.periodStart >= cfg.periodEnd) ctx.errors.push('Portfolio_Info: Period_Start must be before Period_End.');
   if (cfg.valuationDate && cfg.periodEnd && cfg.valuationDate !== cfg.periodEnd) ctx.warnings.push(`Valuation_Date (${cfg.valuationDate}) differs from Period_End (${cfg.periodEnd}); VaR uses positions on Valuation_Date.`);
   if (cfg.baseCurrency !== 'PHP') ctx.warnings.push(`Base currency ${cfg.baseCurrency}: PSE prices are in PHP and no FX conversion is applied in this version.`);
@@ -133,18 +149,44 @@ function readConfig(wb, ctx) {
   return cfg;
 }
 
-export function parseWorkbook(wb) {
-  const ctx = { errors: [], warnings: [] };
-  const config = readConfig(wb, ctx);
+// Daily prices: a separate market price file (any sheet with security, date and price
+// columns), or a Price_History sheet inside the portfolio workbook.
+function readPrices(wb, ctx, anySheet, label) {
+  const PH = readTable(wb, ['Price_History', 'PriceHistory', 'Prices', 'Market_Price', 'MarketPrice', 'Market_Prices'], ['date', 'ticker', 'price', 'adj'], ['date', 'ticker', 'price'], ctx, anySheet);
+  if (anySheet && !PH) ctx.errors.push(`${label}: no sheet with security, date and price columns (e.g. security, effective_date, mkt_price).`);
+  const out = [];
+  let bad = 0;
+  for (const r of PH || []) {
+    const date = excelDate(r.date), ticker = cleanTicker(r.ticker), close = num(r.price), adj = num(r.adj);
+    if (!date && !ticker) continue;
+    if (!date || !ticker || !(close > 0)) { bad++; continue; }
+    out.push({ date, ticker, close, adj: adj > 0 ? adj : null });
+  }
+  if (bad) ctx.warnings.push(`${label}: ${bad} row(s) skipped (missing date, security or a positive price).`);
+  return out;
+}
 
-  // ---- Holdings ----
-  const H = readTable(wb, ['Holdings', 'Positions'], ['date', 'ticker', 'yahoo', 'isin', 'name', 'sector', 'subsector', 'qty', 'avgCost', 'price', 'mv'], ['ticker', 'qty'], ctx);
-  if (!H) ctx.errors.push('Required sheet "Holdings" not found.');
+export function parseWorkbook(wb, priceWb = null) {
+  const ctx = { errors: [], warnings: [], info: [] };
+  const priceHistory = priceWb ? readPrices(priceWb, ctx, true, 'Market price file') : readPrices(wb, ctx, false, 'Price_History');
+  let priceRange = null;
+  if (priceHistory.length) {
+    let min = priceHistory[0].date, max = min;
+    for (const p of priceHistory) { if (p.date < min) min = p.date; if (p.date > max) max = p.date; }
+    priceRange = { min, max, securities: new Set(priceHistory.map((p) => p.ticker)).size };
+  }
+  const config = readConfig(wb, ctx, priceRange);
+
+  // ---- Holdings (sheet named Holdings/Positions/Portfolio, or any sheet with security + quantity columns) ----
+  const H = readTable(wb, ['Holdings', 'Positions', 'Portfolio'], ['date', 'ticker', 'yahoo', 'isin', 'name', 'sector', 'subsector', 'qty', 'avgCost', 'price', 'mv'], ['ticker', 'qty'], ctx, true);
+  if (!H) ctx.errors.push('No holdings found: the portfolio file needs a sheet with a security code column and a quantity column.');
   const holdings = [];
   for (const r of H || []) {
     const ticker = cleanTicker(r.ticker);
     const qty = num(r.qty);
-    if (!ticker && qty == null) continue; // note / blank line
+    if (!ticker && qty == null) continue; // blank line
+    if (/\s/.test(ticker) && ticker.length > 12 && (qty == null || isNaN(qty))) continue; // note text in the code column
+    if (qty == null) { ctx.warnings.push(`Holdings row ${r._row} (${ticker}): no quantity, row skipped.`); continue; }
     if (!ticker) { ctx.warnings.push(`Holdings row ${r._row}: blank ticker, row skipped.`); continue; }
     if (qty == null || isNaN(qty)) { ctx.errors.push(`Holdings row ${r._row} (${ticker}): quantity is not a number.`); continue; }
     holdings.push({
@@ -199,7 +241,7 @@ export function parseWorkbook(wb) {
     benchmark.forEach((b) => (b.weight /= tw)); // works for % or fractions; always normalised to 100%
     const off = tw > 1.5 ? Math.abs(tw - 100) > 0.5 : Math.abs(tw - 1) > 0.005;
     if (off) ctx.warnings.push(`Benchmark weights sum to ${tw.toFixed(2)}${tw > 1.5 ? '%' : ''}; normalised to 100%.`);
-  } else ctx.warnings.push('No Benchmark_Constituents sheet: attribution report will be skipped.');
+  } else ctx.info.push('No Benchmark_Constituents sheet: performance is shown against the PSEi, but the sector attribution report is skipped.');
 
   // ---- Stress scenarios (optional) ----
   const S = readTable(wb, ['Stress_Scenarios', 'Scenarios'], ['scenario', 'type', 'target', 'shock', 'start', 'end'], ['scenario', 'type'], ctx) || [];
@@ -220,18 +262,14 @@ export function parseWorkbook(wb) {
   const O = readTable(wb, ['Price_Override', 'Price_Overrides'], ['date', 'ticker', 'price'], ['date', 'ticker', 'price'], ctx) || [];
   const overrides = O.map((r) => ({ date: excelDate(r.date), ticker: cleanTicker(r.ticker), price: num(r.price) })).filter((o) => o.date && o.ticker && o.price > 0);
 
-  // ---- Price history from the PMS (optional; overrides fetched prices for the tickers it covers)
-  const PH = readTable(wb, ['Price_History', 'PriceHistory', 'Prices'], ['date', 'ticker', 'price', 'adj'], ['date', 'ticker', 'price'], ctx) || [];
-  const priceHistory = [];
-  let badPx = 0;
-  for (const r of PH) {
-    const date = excelDate(r.date), ticker = cleanTicker(r.ticker), close = num(r.price), adj = num(r.adj);
-    if (!date && !ticker) continue;
-    if (!date || !ticker || !(close > 0)) { badPx++; continue; }
-    priceHistory.push({ date, ticker, close, adj: adj > 0 ? adj : null });
-  }
-  if (badPx) ctx.warnings.push(`Price_History: ${badPx} row(s) skipped (missing date, ticker or a positive close).`);
-
   if (!holdings.length && H) ctx.errors.push('Holdings sheet has no valid rows.');
-  return { config, holdings, transactions, cashFlows, benchmark, scenarios, overrides, priceHistory, errors: ctx.errors, warnings: ctx.warnings };
+  if (priceHistory.length) {
+    const have = new Set(priceHistory.map((p) => p.ticker));
+    const missing = [...new Set(holdings.filter((h) => h.ticker !== 'CASH' && !have.has(h.ticker)).map((h) => h.ticker))];
+    if (missing.length) ctx.warnings.push(`${missing.length} holding(s) not found in the price data: ${missing.join(', ')}. Check that the portfolio uses the same security codes as the price file.`);
+    if (!transactions.length && !cashFlows.length) ctx.info.push(`No Transactions or Cash_Flows: performance assumes today's holdings were held unchanged from ${config.periodStart} to ${config.periodEnd}.`);
+    if (!transactions.some((t) => t.type === 'DIVIDEND')) ctx.info.push('The price data has no dividends, so returns are price-only. Add DIVIDEND rows in Transactions to include them.');
+  }
+  if (holdings.length && holdings.every((h) => h.ticker === 'CASH' || h.sector === 'Unclassified')) ctx.info.push('No Sector column in the portfolio: risk by sector and attribution group everything as "Unclassified".');
+  return { config, holdings, transactions, cashFlows, benchmark, scenarios, overrides, priceHistory, priceRange, priceSource: priceWb ? 'file' : priceHistory.length ? 'sheet' : 'online', errors: ctx.errors, warnings: ctx.warnings, info: ctx.info };
 }

@@ -7,7 +7,7 @@ import { renderSummary, renderRisk, renderPerformance, renderAttribution, render
 
 const $ = (id) => document.getElementById(id);
 const log = $('log');
-let workbook = null, fileName = '', ctx = null;
+let workbook = null, fileName = '', priceWb = null, priceFileName = '', ctx = null, serverMode = 'live';
 // PSE_HOSTED is set by the single-file build (tools/build_hosted.mjs): no server,
 // prices generated in the browser, files saved through the host's download prompt.
 const HOSTED = !!window.PSE_HOSTED;
@@ -23,24 +23,29 @@ if (HOSTED) {
 }
 else fetch('/api/status').then((r) => r.json()).then((s) => {
   const b = $('modeBadge');
+  serverMode = s.mode;
   if (s.mode === 'demo') demoBadge();
   else if (s.stockSource === 'eodhd') { b.textContent = 'Live: EODHD stocks · Yahoo index'; b.className = 'badge live'; b.title = 'PSE stock prices from EODHD; PSEi index from Yahoo Finance'; }
-  else { b.textContent = 'Stocks: needs Price_History or EODHD'; b.className = 'badge warnb'; b.title = 'Yahoo Finance no longer carries Philippine stocks. Add a Price_History sheet to the workbook, or set EODHD_API_KEY on the server. The PSEi index still comes from Yahoo.'; }
+  else { b.textContent = 'Prices: your market price file'; b.className = 'badge live'; b.title = 'Stock prices come from the market price file you upload; the PSEi index comes from Yahoo Finance.'; }
 }).catch(() => { $('modeBadge').textContent = 'Price server offline'; });
 
-// ---- sample workbook
+// ---- sample workbooks
+// Live mode: a portfolio using the PMS security codes, priced from the uploaded market price file.
+// Demo / hosted test build: the full sample workbook, priced with synthetic data.
+const demoish = () => HOSTED || serverMode === 'demo';
+const sampleName = () => (demoish() ? 'PSE_Portfolio_Sample.xlsx' : 'Portfolio_Template.xlsx');
 async function sampleBytes() {
   if (HOSTED) return Uint8Array.from(atob(window.PSE_SAMPLE_B64), (c) => c.charCodeAt(0)).buffer;
-  const r = await fetch('/sample/PSE_Portfolio_Sample.xlsx');
+  const r = await fetch('/sample/' + sampleName());
   if (!r.ok) throw new Error('sample not found');
   return r.arrayBuffer();
 }
 $('btnSample').addEventListener('click', async () => {
-  const buf = await sampleBytes();
-  await loadBuffer(buf, 'PSE_Portfolio_Sample.xlsx');
+  if (!demoish() && !priceWb) { log.innerHTML = ''; say('Add the market price file first (box 2), then run the sample portfolio.', 'warn'); return; }
+  await loadBuffer(await sampleBytes(), sampleName(), 'port');
   if (workbook) run();
 });
-$('btnSaveSample').addEventListener('click', async () => saveFile('PSE_Portfolio_Sample.xlsx', await sampleBytes()));
+$('btnSaveSample').addEventListener('click', async () => saveFile(sampleName(), await sampleBytes()));
 
 // ---- saving files: the hosted page must go through the viewer's download prompt
 let downloadsApi;
@@ -57,21 +62,35 @@ async function saveFile(name, buf) {
   catch (e) { if (e && e.code !== 'declined') say('Could not save the file: ' + (e.message || e.code), 'warn'); }
 }
 
-// file input + drag/drop
-const drop = $('drop');
-$('file').addEventListener('change', (e) => loadFile(e.target.files[0]));
-['dragover', 'dragenter'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
-['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, () => drop.classList.remove('over')));
-drop.addEventListener('drop', (e) => { e.preventDefault(); if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); });
-
-async function loadFile(f) {
-  if (!f) return;
-  await loadBuffer(await f.arrayBuffer(), f.name);
+// file inputs + drag/drop: box 1 = portfolio, box 2 = market prices
+function wireDrop(dropId, inputId, slot) {
+  const drop = $(dropId);
+  $(inputId).addEventListener('change', (e) => loadFile(e.target.files[0], slot));
+  ['dragover', 'dragenter'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, () => drop.classList.remove('over')));
+  drop.addEventListener('drop', (e) => { e.preventDefault(); if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0], slot); });
 }
-async function loadBuffer(buf, name) {
-  fileName = name; $('fileName').textContent = name;
-  try { workbook = XLSX.read(buf, { type: 'array' }); $('btnRun').disabled = false; }
-  catch (e) { workbook = null; log.innerHTML = ''; say('Could not read the file as Excel: ' + e.message, 'err'); }
+wireDrop('drop', 'file', 'port');
+wireDrop('dropPx', 'filePx', 'px');
+
+async function loadFile(f, slot) {
+  if (!f) return;
+  await loadBuffer(await f.arrayBuffer(), f.name, slot);
+}
+async function loadBuffer(buf, name, slot) {
+  const el = $(slot === 'px' ? 'fileNamePx' : 'fileName');
+  el.textContent = 'Reading ' + name + '…';
+  await new Promise((r) => setTimeout(r, 0));
+  try {
+    const wb = XLSX.read(buf, { type: 'array' });
+    if (slot === 'px') { priceWb = wb; priceFileName = name; } else { workbook = wb; fileName = name; }
+    el.textContent = name;
+    $('btnRun').disabled = !workbook;
+  } catch (e) {
+    if (slot === 'px') priceWb = null; else workbook = null;
+    el.textContent = '';
+    log.innerHTML = ''; say(`Could not read ${name} as Excel: ${e.message}`, 'err');
+  }
 }
 
 $('btnRun').addEventListener('click', run);
@@ -87,15 +106,19 @@ async function run() {
   if (!workbook) return;
   $('btnRun').disabled = true; log.innerHTML = '';
   try {
-    const model = parseWorkbook(workbook);
-    say(`Read ${model.holdings.length} holding rows, ${model.transactions.length} transactions, ${model.cashFlows.length} cash flows, ${model.benchmark.length} benchmark constituents.`);
+    const model = parseWorkbook(workbook, priceWb);
+    if (!demoish() && !model.priceHistory.length) { say('No prices: add the market price file in box 2 (or a Price_History sheet in the portfolio file).', 'err'); return; }
+    say(`Read ${model.holdings.length} holding rows${model.transactions.length ? `, ${model.transactions.length} transactions` : ''}${model.cashFlows.length ? `, ${model.cashFlows.length} cash flows` : ''}${model.benchmark.length ? `, ${model.benchmark.length} benchmark constituents` : ''}.`);
+    if (model.priceRange) say(`Prices: ${model.priceRange.securities} securities, ${model.priceRange.min} → ${model.priceRange.max}${priceWb ? ` from ${priceFileName}` : ' from the Price_History sheet'}.`);
+    model.info.forEach((w) => say(w));
     model.warnings.forEach((w) => say(w, 'warn'));
     if (model.errors.length) { model.errors.forEach((e) => say(e, 'err')); say('Fix the errors above and upload again.', 'err'); return; }
 
     const progress = say('Fetching prices…');
     const fetched = await fetchPrices(model, (t) => (progress.textContent = t));
     const nOk = Object.keys(fetched.data).length, nErr = Object.keys(fetched.errors).length;
-    progress.textContent = `Prices: ${nOk} symbols loaded (${fetched.from} → ${fetched.to})${fetched.localCount ? `, ${fetched.localCount} from the Price_History sheet` : ''}${nErr ? `, ${nErr} failed` : ''}${fetched.mode === 'demo' ? ' — DEMO synthetic data' : ''}.`;
+    const localLabel = model.priceSource === 'file' ? 'the market price file' : 'the Price_History sheet';
+    progress.textContent = `Prices matched: ${nOk} symbols${fetched.localCount ? ` (${fetched.localCount} from ${localLabel})` : ''}${nErr ? `, ${nErr} missing` : ''}${fetched.mode === 'demo' ? ' — DEMO synthetic data' : ''}.`;
     if (nErr && Object.values(fetched.errors).some((e) => /no longer carries/i.test(e)))
       say('Yahoo Finance no longer provides Philippine stock prices. Add a Price_History sheet (Date, PSE_Ticker, Close) exported from your PMS, or ask your administrator to set an EODHD API key on the server.', 'err');
     progress.className = nErr ? 'warn' : 'ok';
@@ -103,7 +126,7 @@ async function run() {
 
     const panel = buildPanel(model, fetched);
     const book = buildBook(model, panel, fetched);
-    const msgs = { errors: [...model.errors, ...(book.errors || [])], warnings: [...model.warnings, ...panel.warnings, ...(book.warnings || [])] };
+    const msgs = { errors: [...model.errors, ...(book.errors || [])], warnings: [...model.warnings, ...panel.warnings, ...(book.warnings || [])], info: [...model.info] };
     if (book.errors && book.errors.length && !book.dates) { book.errors.forEach((e) => say(e, 'err')); return; }
 
     say('Computing VaR…');
@@ -128,8 +151,10 @@ function render() {
   const c = ctx.model.config;
   destroyCharts();
   $('report').hidden = false;
-  $('rTitle').textContent = `${c.name}${c.id ? ' · ' + c.id : ''}`;
-  $('rMeta').textContent = `Period ${ctx.book.dates[0]} → ${ctx.book.dates[ctx.book.T - 1]} · valuation ${c.valuationDate} · benchmark ${c.benchmarkName} · ${ctx.fetched.mode === 'demo' ? 'DEMO synthetic prices' : 'prices: Yahoo Finance'} · source file ${fileName}`;
+  const title = c.hasInfoSheet ? c.name : fileName.replace(/\.[^.]+$/, '');
+  $('rTitle').textContent = `${title}${c.id ? ' · ' + c.id : ''}`;
+  const src = ctx.fetched.mode === 'demo' ? 'DEMO synthetic prices' : ctx.model.priceSource === 'file' ? `prices: ${priceFileName}` : ctx.model.priceSource === 'sheet' ? 'prices: Price_History sheet' : 'prices: online';
+  $('rMeta').textContent = `Period ${ctx.book.dates[0]} → ${ctx.book.dates[ctx.book.T - 1]} · valuation ${c.valuationDate} · benchmark ${c.benchmarkName} · ${src} · portfolio ${fileName}`;
   const issues = ctx.msgs.errors.length + ctx.msgs.warnings.length + ctx.dq.filter((d) => d.status !== 'OK').length;
   $('dqCount').textContent = issues ? String(issues) : '';
   renderSummary($('tab-summary'), ctx);

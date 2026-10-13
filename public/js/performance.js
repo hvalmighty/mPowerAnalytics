@@ -136,6 +136,6 @@ export function computePerformance(model, panel, book) {
     },
     chart: { dates, gP, gB, ddP: ddP.series, ddB: ddB.series, rolling },
     months, contrib, bySector: Object.values(bySector).sort((a, b) => b.contribution - a.contribution),
-    rb, benchmarkLabel: `${config.benchmarkName} (${config.benchmarkReturnType === 'TOTAL' ? 'total return' : 'price return'})`,
+    rb, hasBench: !!(bmPx && bmPx.slice(book.i0, book.i0 + T).filter((x) => x != null).length > T * 0.8), benchmarkLabel: `${config.benchmarkName} (${config.benchmarkReturnType === 'TOTAL' ? 'total return' : 'price return'})`,
   };
 }

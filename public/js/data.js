@@ -22,9 +22,15 @@ export async function fetchPrices(model, onProgress) {
   // Prices supplied in the workbook (Price_History) take precedence over any fetched source.
   const data = {}, errors = {}; let mode = 'live';
   const local = buildLocalPrices(model, yahooOf);
-  for (const [sym, d] of Object.entries(local)) { data[sym] = d; symbols.delete(sym); }
+  for (const [sym, d] of Object.entries(local)) if (symbols.has(sym)) { data[sym] = d; symbols.delete(sym); } // only what the portfolio and benchmark use
+  for (const sym of Object.keys(local)) if (!data[sym]) delete local[sym];
   const localCount = Object.keys(local).length;
   if (localCount) onProgress && onProgress(`Using Price_History from the workbook for ${localCount} symbol(s)…`);
+  // With a market price file, only the benchmark index is fetched online; anything else
+  // missing from the file is reported rather than looked up elsewhere.
+  if (model.priceSource === 'file') {
+    for (const s of [...symbols]) if (s !== config.benchmarkSymbol) { errors[s] = 'Not in the market price file'; symbols.delete(s); }
+  }
   const list = [...symbols];
   const BATCH = 6; // small requests stay inside serverless time limits (Vercel, Netlify)
   if (typeof window !== 'undefined' && window.PSE_PRICE_PROVIDER) { // browser-only build
@@ -232,12 +238,16 @@ export function buildBook(model, panel, fetched) {
 
   // --- valuations & P&L
   const mv = {}; const pnl = {};
-  const missingPx = new Set();
+  const missingPx = new Set(), backfilled = new Set();
   for (const t of tickers) {
     mv[t] = new Array(T).fill(0); pnl[t] = new Array(T).fill(0);
     let lastP = null;
     for (let k = 0; k < T; k++) {
       let p = px(t, k);
+      if (p == null && lastP == null && qty[t][k]) {
+        // held before its first price (e.g. listed or first priced mid-period): carry the first known price back
+        for (let j = k + 1; j < T; j++) { const f = px(t, j); if (f != null) { p = f; backfilled.add(`${t} (until ${dates[j]})`); break; } }
+      }
       if (p == null) { p = lastP; if (qty[t][k] && p == null) missingPx.add(t); }
       lastP = p ?? lastP;
       mv[t][k] = qty[t][k] * (p || 0);
@@ -245,6 +255,7 @@ export function buildBook(model, panel, fetched) {
     }
   }
   for (const t of missingPx) errors.push(`${t}: no Yahoo price and no PMS price on some held dates — valued at zero. Add a Price_Override.`);
+  if (backfilled.size) warnings.push(`No price at the start of the period for ${[...backfilled].join(', ')}; the first available price is used for earlier days.`);
   for (const t of fallbackUsed) warnings.push(`${t}: Yahoo price missing on some dates; PMS price from Holdings used instead.`);
 
   const V = new Array(T).fill(0); const ret = new Array(T).fill(0);
@@ -301,7 +312,7 @@ export function dataQuality(model, panel, fetched, book) {
     else if (obs < window * 0.95) { status = 'GAPS'; note = `${window - obs} missing days forward-filled or proxied`; }
     if (s.override) note += (note ? '; ' : '') + 'manual price override applied';
     const fd = fetched.data[yahoo]; const src = fd && (fd.source === 'workbook' ? 'workbook' : fd.provider || fd.source);
-    if (src) note = `[${src === 'workbook' ? 'Price_History sheet' : src === 'eodhd' ? 'EODHD' : src === 'demo' ? 'demo' : 'Yahoo'}] ` + note;
+    if (src) note = `[${src === 'workbook' ? (model.priceSource === 'file' ? 'price file' : 'Price_History sheet') : src === 'eodhd' ? 'EODHD' : src === 'demo' ? 'demo' : 'Yahoo'}] ` + note;
     rows.push({ ticker, yahoo, role, status, note, obs, window, first: s.firstDate, last: s.lastDate, lastPx });
   };
   const held = book && book.tickers ? book.tickers : [];

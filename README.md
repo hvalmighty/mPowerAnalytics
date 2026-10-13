@@ -52,6 +52,28 @@ docker run -d -p 3000:3000 --name pse-analytics pse-analytics
 
 `npm run build-hosted` writes `dist/pse-portfolio-analytics.html`. It is a self-contained page with synthetic prices and the sample workbook embedded, and it needs no server, so it is useful for demos. It cannot fetch real prices, because browsers block calls to Yahoo from a web page.
 
+## Inputs (how you use it day to day)
+
+Upload two files on the page:
+
+1. **Portfolio**: the PMS holdings export. It needs one row per holding with a security code column (`Security`, `Ticker`, `Code`…) and a quantity column. Add a `Sector` column for sector risk, and a `CASH` row for cash. `public/sample/Portfolio_Template.xlsx` shows the layout.
+2. **Market prices**: the PMS market price export, as it comes (`security`, `effective_date`, `mkt_price`; any sheet name).
+
+The security codes in both files must match. They are the PMS codes, not PSE tickers: SM Investments is `SMM`, Ayala Corp `ACY`, SM Prime `SMP`, AREIT `ARE`, GT Capital `GTC`.
+
+Without other sheets, the app:
+- values the portfolio on the latest price date,
+- measures performance over the whole price period, assuming today's holdings were held unchanged, price-only,
+- compares against the PSEi (from Yahoo Finance),
+- skips sector attribution.
+
+Optional sheets in the portfolio file refine this:
+- `Transactions` and `Cash_Flows` for exact performance when the portfolio changed (include `DIVIDEND` rows for income),
+- `Benchmark_Constituents` for attribution,
+- `Portfolio_Info` for dates and VaR settings.
+
+With one year of prices, VaR uses about 244 days of history and the backtest is skipped. It needs 520+ days.
+
 ## Where prices come from
 
 **Yahoo Finance no longer carries individual Philippine stocks.** Requests for symbols like `BDO.PS` come back "No data found". Only the PSEi index (`PSEI.PS`) is still available there. So stock prices come from one of these, in order of precedence:

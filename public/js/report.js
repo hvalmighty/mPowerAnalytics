@@ -55,8 +55,10 @@ export function renderSummary(el, ctx) {
   if (h99) html += kpi(`1-day VaR ${(risk.aMax * 100).toFixed(0)}% (historical)`, fmt.php(h99.histVar), `${fmt.pct(h99.histVar / risk.totalNAV)} of NAV · ES ${fmt.php(h99.histEs)}`);
   if (perf) {
     html += kpi('Time-weighted return', fmt.pct(perf.twr), `${perf.start} → ${perf.end}`);
-    html += kpi('Benchmark return', fmt.pct(perf.bench), esc(model.config.benchmarkName));
-    html += kpi('Active return', `<span class="${sign(perf.active) === 'neg' ? 'neg' : ''}">${fmt.pct(perf.active)}</span>`, `IR ${fmt.num(perf.stats.ir)} · TE ${fmt.pct(perf.stats.te)}`);
+    if (perf.hasBench) {
+      html += kpi('Benchmark return', fmt.pct(perf.bench), esc(model.config.benchmarkName));
+      html += kpi('Active return', `<span class="${sign(perf.active) === 'neg' ? 'neg' : ''}">${fmt.pct(perf.active)}</span>`, `IR ${fmt.num(perf.stats.ir)} · TE ${fmt.pct(perf.stats.te)}`);
+    } else html += kpi('Benchmark return', 'Not available', `${esc(model.config.benchmarkName)} could not be loaded`);
     html += kpi('Money-weighted (XIRR)', fmt.pct(perf.irr), 'annualised');
   }
   html += '</div>';
@@ -82,7 +84,7 @@ function growthChart(perf) {
   const d = perf.chart;
   return { type: 'line', data: { labels: d.dates, datasets: [
     { label: 'Portfolio', data: d.gP, borderColor: css('--series-1') },
-    { label: 'Benchmark', data: d.gB, borderColor: css('--series-2') },
+    ...(perf.hasBench ? [{ label: 'Benchmark', data: d.gB, borderColor: css('--series-2') }] : []),
   ] }, options: merge(baseOpts(), { plugins: { tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.raw.toFixed(2)}` } } } }) };
 }
 
@@ -168,7 +170,7 @@ export function renderRisk(el, ctx) {
 
 function heatmap({ tickers, m }) {
   // diverging blue (+1) – neutral – red (−1)
-  const pos = [0xcd, 0xe2, 0xfb, 0x1c, 0x5c, 0xab], negc = [0xfb, 0xd5, 0xd4, 0xb0, 0x26, 0x26];
+  const pos = [0xd6, 0xe0, 0xeb, 0x19, 0x39, 0x5c] /* brand navy */, negc = [0xfb, 0xd5, 0xd4, 0xb0, 0x26, 0x26];
   const mid = [0xf0, 0xef, 0xec];
   const col = (v) => {
     const t = Math.min(1, Math.abs(v)); const c = v >= 0 ? pos : negc;
@@ -189,8 +191,10 @@ export function renderPerformance(el, ctx) {
   let html = '<div class="kpis">';
   html += kpi('Time-weighted return (net)', fmt.pct(p.twr), p.annTwr != null ? `annualised ${fmt.pct(p.annTwr)}` : `${p.start} → ${p.end}`);
   if (p.fees > 0) html += kpi('TWR gross of fees', fmt.pct(p.twrGross), `fees ${fmt.php(p.fees)}`);
-  html += kpi('Benchmark', fmt.pct(p.bench), esc(p.benchmarkLabel));
-  html += kpi('Active return', fmt.pct(p.active), `${fmt.bp(p.active)}`);
+  if (p.hasBench) {
+    html += kpi('Benchmark', fmt.pct(p.bench), esc(p.benchmarkLabel));
+    html += kpi('Active return', fmt.pct(p.active), `${fmt.bp(p.active)}`);
+  } else html += kpi('Benchmark', 'Not available', 'index prices could not be loaded; benchmark figures below are blank');
   html += kpi('Money-weighted (XIRR)', fmt.pct(p.irr), `annualised · period ${fmt.pct(p.mwrPeriod)}`);
   html += kpi('Investment gain', fmt.php(p.gain), `NAV ${fmt.php(p.startValue)} → ${fmt.php(p.endValue)}`);
   html += '</div>';
@@ -327,10 +331,10 @@ export function renderAttribution(el, ctx) {
 export function renderDQ(el, ctx) {
   const { msgs, dq, book } = ctx;
   let html = '';
-  html += panel('Messages', (msgs.errors.map((m) => `<div class="msg err">${esc(m)}</div>`).join('') + msgs.warnings.map((m) => `<div class="msg warn">${esc(m)}</div>`).join('')) || '<p class="muted">No issues found.</p>',
+  html += panel('Messages', (msgs.errors.map((m) => `<div class="msg err">${esc(m)}</div>`).join('') + msgs.warnings.map((m) => `<div class="msg warn">${esc(m)}</div>`).join('') + (msgs.info || []).map((m) => `<div class="msg info">${esc(m)}</div>`).join('')) || '<p class="muted">No issues found.</p>',
     book && book.openingMode ? esc(book.openingMode) : '');
-  html += '<div class="grid1" style="margin-top:16px">' + panel('Price coverage (Yahoo Finance)', table([
-    { h: 'Ticker', l: true, f: (x) => `<b>${esc(x.ticker)}</b>` }, { h: 'Yahoo symbol', l: true, f: (x) => esc(x.yahoo) }, { h: 'Used in', l: true, f: (x) => esc(x.role) },
+  html += '<div class="grid1" style="margin-top:16px">' + panel('Price coverage', table([
+    { h: 'Ticker', l: true, f: (x) => `<b>${esc(x.ticker)}</b>` }, { h: 'Price key', l: true, f: (x) => esc(x.yahoo) }, { h: 'Used in', l: true, f: (x) => esc(x.role) },
     { h: 'Status', l: true, f: (x) => `<span class="status ${x.status.replace(' ', '')}">${x.status}</span>` },
     { h: 'Days in VaR window', f: (x) => (x.window ? `${x.obs} / ${x.window}` : '0') }, { h: 'First date', l: true, f: (x) => x.first || '–' }, { h: 'Last date', l: true, f: (x) => x.last || '–' },
     { h: 'Last price', f: (x) => fmt.num(x.lastPx) }, { h: 'Note', l: true, wrap: true, f: (x) => esc(x.note) },

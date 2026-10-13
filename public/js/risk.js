@@ -42,9 +42,24 @@ export function computeRisk(model, panel, book) {
   // ---- log-return matrix (rows = dates, oldest first); benchmark proxies gaps
   const L = config.lookback;
   let B = config.backtestDays;
-  const firstIdx = Math.max(1, iv - L - B + 1);
-  if (iv - firstIdx + 1 < L + B) { B = Math.max(0, iv - firstIdx + 1 - L); warnings.push(`Only ${iv} days of history available: backtest shortened to ${B} days.`); }
+  // History starts where prices exist for at least 90% of the portfolio's value; before that
+  // date the calendar may come from the index alone (e.g. a one-year PMS price file).
+  let shortHistory = false;
+  const absMV = MV.reduce((s, x) => s + Math.abs(x), 0);
+  let dataStart = 1;
+  for (let i = 1; i <= iv; i++) {
+    let cov = 0;
+    positions.forEach((p, j) => { const s = series[p.yahoo]; if (s && s.adj[i] != null && s.adj[i - 1] != null) cov += Math.abs(MV[j]); });
+    if (cov >= 0.9 * absMV) { dataStart = i; break; }
+  }
+  const avail = iv - dataStart + 1;
+  const firstIdx = Math.max(dataStart, iv - L - B + 1);
+  if (avail < L + B) {
+    if (avail >= L + 20) { B = avail - L; warnings.push(`${avail} days of price history: backtest shortened to ${B} days.`); }
+    else { B = 0; shortHistory = true; warnings.push(`Only ${avail} days of price history: VaR uses ${Math.min(L, avail)} days and the backtest is skipped (it needs ${L + 20}+ days).`); }
+  }
   const lookbackUsed = Math.min(L, iv - firstIdx + 1);
+  if (lookbackUsed < 120) warnings.push(`VaR is based on only ${lookbackUsed} days of returns; treat it as indicative.`);
   const idxRet = (i) => (bmS && bmS.adj[i] && bmS.adj[i - 1] ? Math.log(bmS.adj[i] / bmS.adj[i - 1]) : 0);
   const proxied = new Array(N).fill(0);
   const rows = []; // all days firstIdx..iv
@@ -151,7 +166,7 @@ export function computeRisk(model, panel, book) {
       const cdf = binomCdf(x, n, p);
       backtest.byConf.push({ conf: a, exceptions: x, expected: n * p, lr, pValue: chi2sf1(lr), zone: cdf < 0.95 ? 'Green' : cdf < 0.9999 ? 'Yellow' : 'Red' });
     }
-  } else warnings.push('Not enough history for a VaR backtest (need lookback + 20 days).');
+  } else if (!shortHistory) warnings.push('Not enough history for a VaR backtest (need lookback + 20 days).');
 
   // ---- stress tests
   const stress = [];

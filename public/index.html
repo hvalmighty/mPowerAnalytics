@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PSE Portfolio Analytics</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%231c5cab%22/%3E%3Cpath d=%22M16 8l9 15H7z%22 fill=%22white%22/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%2319395c%22/%3E%3Cpath d=%22M16 8l9 15H7z%22 fill=%22white%22/%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/style.css">
   <script src="/vendor/xlsx/xlsx.full.min.js"></script>
   <script src="/vendor/chartjs/chart.umd.js"></script>
@@ -32,29 +32,33 @@
   <main>
     <section class="upload card" id="uploadCard">
       <div class="upload-grid">
-        <label class="drop" id="drop">
-          <input type="file" id="file" accept=".xlsx,.xls,.xlsm" hidden>
-          <span class="drop-icon" aria-hidden="true">⇪</span>
-          <strong>Drop the PMS export here</strong>
-          <span class="muted">or click to choose an .xlsx file</span>
-          <span id="fileName" class="file-name"></span>
-        </label>
+        <div class="drops">
+          <label class="drop" id="drop">
+            <input type="file" id="file" accept=".xlsx,.xls,.xlsm" hidden>
+            <span class="drop-step">1</span>
+            <strong>Portfolio</strong>
+            <span class="muted">Drop the PMS holdings export, or click to choose</span>
+            <span id="fileName" class="file-name"></span>
+          </label>
+          <label class="drop" id="dropPx">
+            <input type="file" id="filePx" accept=".xlsx,.xls,.xlsm,.csv" hidden>
+            <span class="drop-step">2</span>
+            <strong>Market prices</strong>
+            <span class="muted">Drop the PMS market price export, or click to choose</span>
+            <span id="fileNamePx" class="file-name"></span>
+          </label>
+        </div>
         <div class="upload-help">
-          <h2>Input workbook</h2>
+          <h2>What to upload</h2>
           <ul class="sheet-list">
-            <li><b>Portfolio_Info</b> <span class="req">required</span> dates, benchmark, VaR settings</li>
-            <li><b>Holdings</b> <span class="req">required</span> PSE ticker, sector, quantity, cash</li>
-            <li><b>Transactions</b> buys, sells, dividends, fees in the period</li>
-            <li><b>Cash_Flows</b> client contributions and withdrawals</li>
-            <li><b>Benchmark_Constituents</b> PSEi members, sectors, weights (for attribution)</li>
-            <li><b>Price_History</b> daily closes from the PMS (needed for PSE stocks unless the server has an EODHD key)</li>
-            <li><b>Stress_Scenarios</b>, <b>Price_Override</b> optional</li>
+            <li><b>Portfolio</b> <span class="req">required</span> one row per holding: security code, quantity, and ideally sector. A <code>CASH</code> row for cash.</li>
+            <li><b>Market prices</b> <span class="req">required</span> the PMS price export as it comes: <code>security</code>, <code>effective_date</code>, <code>mkt_price</code>.</li>
           </ul>
-          <p class="muted">Stock prices come from the Price_History sheet or from EODHD; the PSEi index comes from Yahoo Finance. Yahoo no longer carries individual Philippine stocks.</p>
+          <p class="muted">Optional sheets in the portfolio file add more: <b>Transactions</b> and <b>Cash_Flows</b> (exact performance when the portfolio changed), <b>Benchmark_Constituents</b> (sector attribution), <b>Portfolio_Info</b> (dates and VaR settings). Without them the app uses the full price period, treats holdings as unchanged, and compares against the PSEi.</p>
           <div class="row">
             <button id="btnRun" class="btn primary" disabled>Generate reports</button>
             <button id="btnSample" class="btn">Run with sample portfolio</button>
-            <button id="btnSaveSample" class="btn ghost">Download sample workbook</button>
+            <button id="btnSaveSample" class="btn ghost">Download portfolio template</button>
           </div>
         </div>
       </div>
@@ -83,7 +87,7 @@
     </section>
   </main>
 
-  <footer class="foot">Market data: your Price_History sheet, EODHD and Yahoo Finance (index). For internal analysis; verify against your PMS before client reporting.</footer>
+  <footer class="foot">Stock prices from your PMS market price file; PSEi index from Yahoo Finance. For internal analysis; verify against your PMS before client reporting.</footer>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>
