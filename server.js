@@ -215,7 +215,7 @@ app.get('/healthz', (req, res) => res.send('ok'));
 
 function start() {
   return app.listen(PORT, () => {
-  console.log(`PSE Portfolio Analytics running at http://localhost:${PORT}  [${DEMO ? 'DEMO synthetic data' : 'live Yahoo Finance data'}]`);
+  console.log(`mPower Performance and Risk Analytics running at http://localhost:${PORT}  [${DEMO ? 'DEMO synthetic data' : 'live Yahoo Finance data'}]`);
 });
 }
 if (require.main === module) start();
