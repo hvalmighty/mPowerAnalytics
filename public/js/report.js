@@ -63,7 +63,7 @@ export function renderSummary(el, ctx) {
   }
   html += '</div>';
   html += '<div class="grid2">';
-  if (perf) html += panel('Growth of ₱100', legend([[css('--series-1'), 'Portfolio'], [css('--series-2'), 'Benchmark']]) + chartBox('cSumGrowth'));
+  if (perf) html += panel('Growth of ₱100', legend([[css('--series-1'), 'Portfolio'], ...(perf.hasBench ? [[css('--series-2'), 'Benchmark']] : [])]) + chartBox('cSumGrowth'));
   if (risk && !risk.error) html += panel(`Where the risk sits — component VaR by sector (${(risk.aMax * 100).toFixed(0)}%, 1-day)`, chartBox('cSumSector'), 'Parametric Euler decomposition; components add up to total VaR.');
   html += '</div>';
   if (attr && !attr.skipped) {
@@ -200,7 +200,7 @@ export function renderPerformance(el, ctx) {
   html += '</div>';
 
   html += '<div class="grid2">';
-  html += panel('Growth of ₱100', legend([[css('--series-1'), 'Portfolio'], [css('--series-2'), 'Benchmark']]) + chartBox('cGrowth'));
+  html += panel('Growth of ₱100', legend([[css('--series-1'), 'Portfolio'], ...(p.hasBench ? [[css('--series-2'), 'Benchmark']] : [])]) + chartBox('cGrowth'));
   html += panel('Drawdown from peak', legend([[css('--series-1'), 'Portfolio'], [css('--series-2'), 'Benchmark']]) + chartBox('cDD'));
   html += '</div><div class="grid2">';
   html += panel('Returns by period', table([

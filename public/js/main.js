@@ -10,42 +10,39 @@ const $ = (id) => document.getElementById(id);
 // prices generated in the browser, files saved through the host's download prompt.
 const HOSTED = !!window.PSE_HOSTED;
 const log = $('log');
-let workbook = null, fileName = '', priceWb = null, priceFileName = '', ctx = null, serverMode = 'live';
-// Built-in prices (public/data/market_prices.json): used unless a newer price file is dropped in box 2.
+let workbook = null, fileName = '', ctx = null, serverMode = 'live', isSample = false;
+const priceWb = null; // prices are built in; a price-file upload may return later
+
+// Built-in prices (public/data/market_prices.json)
 let builtin = null, builtinInfo = null;
-if (!HOSTED) fetch('/data/market_prices.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
+const builtinReady = HOSTED ? Promise.resolve() : fetch('/data/market_prices.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
   if (!j || !j.dates) return;
   const rows = [];
   for (const [t, arr] of Object.entries(j.series)) arr.forEach((p, i) => { if (p > 0) rows.push({ date: j.dates[i], ticker: t, close: p, adj: null }); });
   builtin = rows; builtinInfo = { n: Object.keys(j.series).length, from: j.from, to: j.to, source: j.source };
-  if (!priceWb) showBuiltin();
 }).catch(() => {});
 const fmtD = (d) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
-function showBuiltin() {
-  $('fileNamePx').textContent = `Built in: ${builtinInfo.n} securities, ${fmtD(builtinInfo.from)} – ${fmtD(builtinInfo.to)}`;
-  $('pxHint').textContent = 'Optional: drop a newer price export to replace the built-in prices';
-}
 
 function say(text, cls = '') { const li = document.createElement('li'); li.textContent = text; if (cls) li.className = cls; log.appendChild(li); return li; }
 
 // data-source badge
 function demoBadge() { const b = $('modeBadge'); b.textContent = 'Demo prices (synthetic)'; b.className = 'badge demo'; $('demoBanner').hidden = false; }
+let statusReady;
 if (HOSTED) {
   demoBadge(); $('btnPrint').hidden = true;
   $('demoBanner').textContent = 'Test version: prices are synthetic and generated in your browser. They are not Yahoo Finance or PSE data, so the figures mean nothing. Real prices need the full app running on a server.';
-  document.querySelector('.foot').textContent = 'Test version with synthetic prices. The full app fetches daily PSE prices from Yahoo Finance.';
-}
-else fetch('/api/status').then((r) => r.json()).then((s) => {
+  document.querySelector('.foot').textContent = 'Test version with synthetic prices.';
+  statusReady = Promise.resolve();
+} else statusReady = fetch('/api/status').then((r) => r.json()).then(async (s) => {
   const b = $('modeBadge');
   serverMode = s.mode;
-  if (s.mode === 'demo') demoBadge();
-  else if (s.stockSource === 'eodhd') { b.textContent = 'Live: EODHD stocks · Yahoo index'; b.className = 'badge live'; b.title = 'PSE stock prices from EODHD; PSEi index from Yahoo Finance'; }
-  else { b.textContent = 'Prices: your market price file'; b.className = 'badge live'; b.title = 'Stock prices come from the market price file you upload; the PSEi index comes from Yahoo Finance.'; }
+  if (s.mode === 'demo') return demoBadge();
+  await builtinReady;
+  if (builtinInfo) { b.textContent = `Prices to ${fmtD(builtinInfo.to)}`; b.className = 'badge live'; b.title = `Built-in prices for ${builtinInfo.n} PSE securities, ${fmtD(builtinInfo.from)} – ${fmtD(builtinInfo.to)}. PSEi index from Yahoo Finance.`; }
+  else { b.textContent = 'Prices unavailable'; b.className = 'badge warnb'; }
 }).catch(() => { $('modeBadge').textContent = 'Price server offline'; });
 
-// ---- sample workbooks
-// Live mode: a portfolio using the PMS security codes, priced from the uploaded market price file.
-// Demo / hosted test build: the full sample workbook, priced with synthetic data.
+// ---- sample portfolio, shown until a portfolio is uploaded
 const demoish = () => HOSTED || serverMode === 'demo';
 const sampleName = () => (demoish() ? 'PSE_Portfolio_Sample.xlsx' : 'Portfolio_Template.xlsx');
 async function sampleBytes() {
@@ -54,12 +51,13 @@ async function sampleBytes() {
   if (!r.ok) throw new Error('sample not found');
   return r.arrayBuffer();
 }
-$('btnSample').addEventListener('click', async () => {
-  if (!demoish() && !priceWb && !builtin) { log.innerHTML = ''; say('Add the market price file first (box 2), then run the sample portfolio.', 'warn'); return; }
-  await loadBuffer(await sampleBytes(), sampleName(), 'port');
-  if (workbook) run();
-});
-$('btnSaveSample').addEventListener('click', async () => saveFile(sampleName(), await sampleBytes()));
+(async () => {
+  say('Loading sample portfolio…');
+  await statusReady; await builtinReady;
+  if (workbook) return; // the user uploaded first
+  try { if (await loadBuffer(await sampleBytes(), sampleName(), true)) run(); }
+  catch (e) { log.innerHTML = ''; say('Could not load the sample portfolio: ' + e.message, 'err'); }
+})();
 
 // ---- saving files: the hosted page must go through the viewer's download prompt
 let downloadsApi;
@@ -76,38 +74,29 @@ async function saveFile(name, buf) {
   catch (e) { if (e && e.code !== 'declined') say('Could not save the file: ' + (e.message || e.code), 'warn'); }
 }
 
-// file inputs + drag/drop: box 1 = portfolio, box 2 = market prices
-function wireDrop(dropId, inputId, slot) {
-  const drop = $(dropId);
-  $(inputId).addEventListener('change', (e) => loadFile(e.target.files[0], slot));
-  ['dragover', 'dragenter'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
-  ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, () => drop.classList.remove('over')));
-  drop.addEventListener('drop', (e) => { e.preventDefault(); if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0], slot); });
-}
-wireDrop('drop', 'file', 'port');
-wireDrop('dropPx', 'filePx', 'px');
+// ---- upload: icon button at the top right, or drop a file anywhere on the page
+$('btnUpload').addEventListener('click', () => $('file').click());
+$('file').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) uploadFile(f); });
+let dragDepth = 0;
+window.addEventListener('dragenter', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); dragDepth++; document.body.classList.add('dragging'); } });
+window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging'); const f = e.dataTransfer.files[0]; if (f) uploadFile(f); });
 
-async function loadFile(f, slot) {
-  if (!f) return;
-  await loadBuffer(await f.arrayBuffer(), f.name, slot);
+async function uploadFile(f) {
+  if (await loadBuffer(await f.arrayBuffer(), f.name, false)) run();
 }
-async function loadBuffer(buf, name, slot) {
-  const el = $(slot === 'px' ? 'fileNamePx' : 'fileName');
-  el.textContent = 'Reading ' + name + '…';
-  await new Promise((r) => setTimeout(r, 0));
+async function loadBuffer(buf, name, sample) {
   try {
-    const wb = XLSX.read(buf, { type: 'array' });
-    if (slot === 'px') { priceWb = wb; priceFileName = name; } else { workbook = wb; fileName = name; }
-    el.textContent = name;
-    $('btnRun').disabled = !workbook;
+    workbook = XLSX.read(buf, { type: 'array' });
+    fileName = name; isSample = sample;
+    return true;
   } catch (e) {
-    if (slot === 'px') priceWb = null; else workbook = null;
-    el.textContent = '';
     log.innerHTML = ''; say(`Could not read ${name} as Excel: ${e.message}`, 'err');
+    return false;
   }
 }
 
-$('btnRun').addEventListener('click', run);
 document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => {
   document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('active', x === b));
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + b.dataset.tab));
@@ -118,15 +107,16 @@ $('btnExcel').addEventListener('click', exportExcel);
 
 async function run() {
   if (!workbook) return;
-  $('btnRun').disabled = true; log.innerHTML = '';
+  const btn = $('btnUpload'); btn.classList.add('busy'); btn.disabled = true; log.innerHTML = '';
+  let ok = false;
   try {
     const model = parseWorkbook(workbook, priceWb, demoish() ? null : builtin);
-    if (!demoish() && !model.priceHistory.length) { say('No prices: add the market price file in box 2 (or a Price_History sheet in the portfolio file).', 'err'); return; }
+    if (!demoish() && !model.priceHistory.length) { say('No prices available: the built-in price data could not be loaded. Reload the page and try again.', 'err'); return; }
     say(`Read ${model.holdings.length} holding rows${model.transactions.length ? `, ${model.transactions.length} transactions` : ''}${model.cashFlows.length ? `, ${model.cashFlows.length} cash flows` : ''}${model.benchmark.length ? `, ${model.benchmark.length} benchmark constituents` : ''}.`);
-    if (model.priceRange) say(`Prices: ${model.priceRange.securities} securities, ${model.priceRange.min} → ${model.priceRange.max} ${priceWb ? `from ${priceFileName}` : model.usedBuiltin ? `(built-in, ${builtinInfo.source})` : 'from the Price_History sheet'}.`);
+    if (model.priceRange) say(`Prices: ${model.priceRange.securities} securities, ${model.priceRange.min} → ${model.priceRange.max} ${model.usedBuiltin ? '(built in)' : 'from the Price_History sheet'}.`);
     model.info.forEach((w) => say(w));
     model.warnings.forEach((w) => say(w, 'warn'));
-    if (model.errors.length) { model.errors.forEach((e) => say(e, 'err')); say('Fix the errors above and upload again.', 'err'); return; }
+    if (model.errors.length) { log.innerHTML = ''; model.errors.forEach((e) => say(e, 'err')); say(`Fix the errors above in ${fileName} and upload it again with the upload button (top right).`, 'err'); return; }
 
     const progress = say('Fetching prices…');
     const fetched = await fetchPrices(model, (t) => (progress.textContent = t));
@@ -154,21 +144,25 @@ async function run() {
     ctx = { model, fetched, panel, book, risk, perf, attr, dq, msgs };
     window.pseReport = ctx; // inspect every intermediate result from the browser console
     render();
-    say('Reports ready.', 'ok');
+    ok = true;
     $('btnExcel').disabled = false; $('btnPrint').disabled = false;
   } catch (e) {
     console.error(e); say('Failed: ' + e.message, 'err');
-  } finally { $('btnRun').disabled = false; }
+  } finally {
+    btn.classList.remove('busy'); btn.disabled = false;
+    // On success the progress log is cleared; every message stays in the Data Quality tab.
+    if (ok) log.innerHTML = '';
+  }
 }
 
 function render() {
   const c = ctx.model.config;
   destroyCharts();
   $('report').hidden = false;
-  const title = c.hasInfoSheet ? c.name : fileName.replace(/\.[^.]+$/, '');
-  $('rTitle').textContent = `${title}${c.id ? ' · ' + c.id : ''}`;
-  const src = ctx.fetched.mode === 'demo' ? 'DEMO synthetic prices' : ctx.model.usedBuiltin ? `prices: built-in (${builtinInfo.from} → ${builtinInfo.to})` : ctx.model.priceSource === 'file' ? `prices: ${priceFileName}` : ctx.model.priceSource === 'sheet' ? 'prices: Price_History sheet' : 'prices: online';
-  $('rMeta').textContent = `Period ${ctx.book.dates[0]} → ${ctx.book.dates[ctx.book.T - 1]} · valuation ${c.valuationDate} · benchmark ${c.benchmarkName} · ${src} · portfolio ${fileName}`;
+  const title = isSample ? 'Sample portfolio' : c.hasInfoSheet ? c.name : fileName.replace(/\.[^.]+$/, '');
+  $('rTitle').textContent = `${title}${c.id && !isSample ? ' · ' + c.id : ''}`;
+  const src = ctx.fetched.mode === 'demo' ? 'DEMO synthetic prices' : ctx.model.usedBuiltin ? `prices: built-in (${builtinInfo.from} → ${builtinInfo.to})` : ctx.model.priceSource === 'file' ? 'prices: uploaded file' : ctx.model.priceSource === 'sheet' ? 'prices: Price_History sheet' : 'prices: online';
+  $('rMeta').textContent = `Period ${ctx.book.dates[0]} → ${ctx.book.dates[ctx.book.T - 1]} · valuation ${c.valuationDate} · benchmark ${c.benchmarkName} · ${src}` + (isSample ? ' · illustrative holdings: upload your portfolio and transactions with the upload button (top right)' : ` · portfolio ${fileName}`);
   const issues = ctx.msgs.errors.length + ctx.msgs.warnings.length + ctx.dq.filter((d) => d.status !== 'OK').length;
   $('dqCount').textContent = issues ? String(issues) : '';
   renderSummary($('tab-summary'), ctx);

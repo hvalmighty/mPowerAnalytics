@@ -19,6 +19,9 @@
     </div>
     <div class="top-actions">
       <span id="modeBadge" class="badge">checking data source…</span>
+      <button id="btnUpload" class="icon-btn" type="button" aria-label="Upload portfolio and transactions" title="Upload portfolio and transactions">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4"/><path d="M7 9l5-5 5 5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
+      </button>
       <button id="btnExcel" class="btn ghost" disabled>Export Excel</button>
       <button id="btnPrint" class="btn ghost" disabled>Print / PDF</button>
     </div>
@@ -29,40 +32,8 @@
   </div>
 
   <main>
-    <section class="upload card" id="uploadCard">
-      <div class="upload-grid">
-        <div class="drops">
-          <label class="drop" id="drop">
-            <input type="file" id="file" accept=".xlsx,.xls,.xlsm" hidden>
-            <span class="drop-step">1</span>
-            <strong>Portfolio</strong>
-            <span class="muted">Drop the PMS holdings export, or click to choose</span>
-            <span id="fileName" class="file-name"></span>
-          </label>
-          <label class="drop" id="dropPx">
-            <input type="file" id="filePx" accept=".xlsx,.xls,.xlsm,.csv" hidden>
-            <span class="drop-step">2</span>
-            <strong>Market prices</strong>
-            <span class="muted" id="pxHint">Drop the PMS market price export, or click to choose</span>
-            <span id="fileNamePx" class="file-name"></span>
-          </label>
-        </div>
-        <div class="upload-help">
-          <h2>What to upload</h2>
-          <ul class="sheet-list">
-            <li><b>Portfolio</b> <span class="req">required</span> one row per holding: security code, quantity, and ideally sector. A <code>CASH</code> row for cash.</li>
-            <li><b>Market prices</b> built into the app (8 Oct 2025 – 8 Oct 2026). Drop a newer PMS price export in box 2 only when you want to update them.</li>
-          </ul>
-          <p class="muted">Optional sheets in the portfolio file add more: <b>Transactions</b> and <b>Cash_Flows</b> (exact performance when the portfolio changed), <b>Benchmark_Constituents</b> (sector attribution), <b>Portfolio_Info</b> (dates and VaR settings). Without them the app uses the full price period, treats holdings as unchanged, and compares against the PSEi.</p>
-          <div class="row">
-            <button id="btnRun" class="btn primary" disabled>Generate reports</button>
-            <button id="btnSample" class="btn">Run with sample portfolio</button>
-            <button id="btnSaveSample" class="btn ghost">Download portfolio template</button>
-          </div>
-        </div>
-      </div>
-      <ol id="log" class="log"></ol>
-    </section>
+    <input type="file" id="file" accept=".xlsx,.xls,.xlsm" hidden>
+    <ol id="log" class="log" aria-live="polite"></ol>
 
     <section id="report" hidden>
       <div class="report-head">
@@ -86,7 +57,7 @@
     </section>
   </main>
 
-  <footer class="foot">Stock prices from your PMS market price file; PSEi index from Yahoo Finance. For internal analysis; verify against your PMS before client reporting.</footer>
+  <footer class="foot">Stock prices built in from the PMS market price export; PSEi index from Yahoo Finance. For internal analysis; verify against your PMS before client reporting.</footer>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>
