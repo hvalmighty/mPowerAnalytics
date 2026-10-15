@@ -19,6 +19,7 @@
     </div>
     <div class="top-actions">
       <span id="modeBadge" class="badge">checking data source…</span>
+      <button id="btnSample" class="icon-btn text" type="button" aria-label="Load sample portfolio" title="Load sample portfolio">Sample</button>
       <button id="btnUpload" class="icon-btn" type="button" aria-label="Upload portfolio and transactions" title="Upload portfolio and transactions">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4"/><path d="M7 9l5-5 5 5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
       </button>
@@ -34,6 +35,7 @@
   <main>
     <input type="file" id="file" accept=".xlsx,.xls,.xlsm" hidden>
     <ol id="log" class="log" aria-live="polite"></ol>
+    <p id="emptyState" class="empty">Upload a portfolio with the <span aria-hidden="true">⇧</span> button at the top right, or click <b>Sample</b> to view the sample portfolio.</p>
 
     <section id="report" hidden>
       <div class="report-head">
@@ -57,7 +59,6 @@
     </section>
   </main>
 
-  <footer class="foot">Stock prices built in from the PMS market price export; PSEi index from Yahoo Finance. For internal analysis; verify against your PMS before client reporting.</footer>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

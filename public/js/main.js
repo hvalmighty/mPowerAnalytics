@@ -31,8 +31,7 @@ let statusReady;
 if (HOSTED) {
   demoBadge(); $('btnPrint').hidden = true;
   $('demoBanner').textContent = 'Test version: prices are synthetic and generated in your browser. They are not Yahoo Finance or PSE data, so the figures mean nothing. Real prices need the full app running on a server.';
-  document.querySelector('.foot').textContent = 'Test version with synthetic prices.';
-  statusReady = Promise.resolve();
+    statusReady = Promise.resolve();
 } else statusReady = fetch('/api/status').then((r) => r.json()).then(async (s) => {
   const b = $('modeBadge');
   serverMode = s.mode;
@@ -51,13 +50,11 @@ async function sampleBytes() {
   if (!r.ok) throw new Error('sample not found');
   return r.arrayBuffer();
 }
-(async () => {
-  say('Loading sample portfolio…');
+$('btnSample').addEventListener('click', async () => {
   await statusReady; await builtinReady;
-  if (workbook) return; // the user uploaded first
   try { if (await loadBuffer(await sampleBytes(), sampleName(), true)) run(); }
   catch (e) { log.innerHTML = ''; say('Could not load the sample portfolio: ' + e.message, 'err'); }
-})();
+});
 
 // ---- saving files: the hosted page must go through the viewer's download prompt
 let downloadsApi;
@@ -107,7 +104,8 @@ $('btnExcel').addEventListener('click', exportExcel);
 
 async function run() {
   if (!workbook) return;
-  const btn = $('btnUpload'); btn.classList.add('busy'); btn.disabled = true; log.innerHTML = '';
+  await statusReady; await builtinReady;
+  const btns = [$('btnUpload'), $('btnSample')]; btns.forEach((b) => { b.classList.add('busy'); b.disabled = true; }); log.innerHTML = '';
   let ok = false;
   try {
     const model = parseWorkbook(workbook, priceWb, demoish() ? null : builtin);
@@ -149,7 +147,7 @@ async function run() {
   } catch (e) {
     console.error(e); say('Failed: ' + e.message, 'err');
   } finally {
-    btn.classList.remove('busy'); btn.disabled = false;
+    btns.forEach((b) => { b.classList.remove('busy'); b.disabled = false; });
     // On success the progress log is cleared; every message stays in the Data Quality tab.
     if (ok) log.innerHTML = '';
   }
@@ -158,11 +156,10 @@ async function run() {
 function render() {
   const c = ctx.model.config;
   destroyCharts();
-  $('report').hidden = false;
+  $('report').hidden = false; $('emptyState').hidden = true;
   const title = isSample ? 'Sample portfolio' : c.hasInfoSheet ? c.name : fileName.replace(/\.[^.]+$/, '');
   $('rTitle').textContent = `${title}${c.id && !isSample ? ' · ' + c.id : ''}`;
-  const src = ctx.fetched.mode === 'demo' ? 'DEMO synthetic prices' : ctx.model.usedBuiltin ? `prices: built-in (${builtinInfo.from} → ${builtinInfo.to})` : ctx.model.priceSource === 'file' ? 'prices: uploaded file' : ctx.model.priceSource === 'sheet' ? 'prices: Price_History sheet' : 'prices: online';
-  $('rMeta').textContent = `Period ${ctx.book.dates[0]} → ${ctx.book.dates[ctx.book.T - 1]} · valuation ${c.valuationDate} · benchmark ${c.benchmarkName} · ${src}` + (isSample ? ' · illustrative holdings: upload your portfolio and transactions with the upload button (top right)' : ` · portfolio ${fileName}`);
+  $('rMeta').textContent = `Period ${ctx.book.dates[0]} → ${ctx.book.dates[ctx.book.T - 1]} · valuation ${c.valuationDate} · benchmark ${c.benchmarkName}` + (isSample ? '' : ` · portfolio ${fileName}`);
   const issues = ctx.msgs.errors.length + ctx.msgs.warnings.length + ctx.dq.filter((d) => d.status !== 'OK').length;
   $('dqCount').textContent = issues ? String(issues) : '';
   renderSummary($('tab-summary'), ctx);
