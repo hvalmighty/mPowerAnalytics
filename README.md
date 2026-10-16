@@ -66,9 +66,10 @@ docker run -d -p 3000:3000 --name pse-analytics pse-analytics
   Asset-class header rows ("Asset Class:ORD - Ordinary Shares") group the positions, and subtotal rows ("… Total :") are skipped. A file can hold several portfolios.
 - **Portfolio dropdown:** lists every portfolio in the file. The **Holdings** tab shows the selected portfolio's positions with the fields above. The other tabs show risk and performance for that portfolio.
 - **Benchmark dropdown:** PSEi. Its prices are simulated (within ±3–5% of today's level), so no external index data is needed.
-- **Prices:** a position whose `Security` code matches the built-in market data (`public/data/market_prices.json`, 263 PSE codes, 8 Oct 2025 – 8 Oct 2026) uses those prices. Any other code gets a simulated daily series that stays within a 3–5% band of today's value (the band is fixed per code, and the series is the same on every run). The screens do not label which series are generated; check `pms.js` and the Excel export if needed.
+- **Prices:** a position whose `Security` code matches the built-in market data (`public/data/market_prices.json`, 270 codes, 1 Oct 2025 – 8 Oct 2026) uses those prices. Any other code gets a simulated daily series that stays within a 3–5% band of today's value (the band is fixed per code, and the series is the same on every run). The screens do not label which series are generated; check `pms.js` and the Excel export if needed.
 - **Assumptions:** quantity is not used. Each holding is valued at its reported market value and moved with its price series, and holdings are treated as unchanged over the price period. Values are in transaction currency as reported, with no FX conversion.
-- **Refreshing prices:** run `python3 tools/build_prices.py <new export.xlsx>` and commit the regenerated JSON.
+- **Refreshing prices:** run `python3 tools/build_prices.py <export1.xlsx> [<export2.xlsx> …]` and commit the regenerated JSON. Files are merged: a later file overrides an earlier one for the same security and date. The current universe is built from `Market_Price_08102025_08102026-Market_Price_Upload.xlsx` (263 PSE codes) and `Price_Upload.xlsx` (7 codes: UITF BALANCED, UITF MUPF, CBAEV, EQ MBT, QPDC, RE123, FTBILLS092226).
+- **Valuation date:** each portfolio is valued on the last day on which all its priced securities have prices, and its period starts on the first such day.
 
 The older workbook layout (Holdings / Transactions / Cash_Flows / Benchmark_Constituents / Portfolio_Info sheets) is still accepted.
 
