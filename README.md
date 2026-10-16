@@ -54,10 +54,22 @@ docker run -d -p 3000:3000 --name pse-analytics pse-analytics
 
 ## Using it
 
-- **On load:** the page shows a sample portfolio valued with the built-in market prices (`public/data/market_prices.json`, 263 PSE securities, 8 Oct 2025 – 8 Oct 2026).
-- **Your own data:** use the upload icon at the top right (or drop a file anywhere on the page) to load your portfolio and transactions workbook. The upload format will be finalised later. For now the app reads a holdings sheet (security code + quantity, optional sector and a `CASH` row) and the optional `Transactions`, `Cash_Flows`, `Benchmark_Constituents` and `Portfolio_Info` sheets.
-- **Security codes:** they are the PMS codes used in the price data (`SMM` = SM Investments, `ACY` = Ayala Corp, `SMP` = SM Prime).
+- **Opening the page:** it starts empty. Upload a file with the upload icon at the top right (or drop it anywhere on the page). The **Sample** button loads `public/sample/Portfolio_Sample_mPower.xlsx`.
+- **Upload format:** the mPower position report. The app uses only these columns:
+  - `Security`
+  - `Security Name`
+  - `Book Cost in Transaction Currency`
+  - `Market Value in Transaction Currency`
+  - `Portfolio`
+
+  Asset-class header rows ("Asset Class:ORD - Ordinary Shares") group the positions, and subtotal rows ("… Total :") are skipped. A file can hold several portfolios.
+- **Portfolio dropdown:** lists every portfolio in the file. The **Holdings** tab shows the selected portfolio's positions with the fields above. The other tabs show risk and performance for that portfolio.
+- **Benchmark dropdown:** PSEi. Its prices are simulated (within ±3–5% of today's level), so no external index data is needed.
+- **Prices:** a position whose `Security` code matches the built-in market data (`public/data/market_prices.json`, 263 PSE codes, 8 Oct 2025 – 8 Oct 2026) uses those prices. Any other code gets a simulated daily series that stays within a 3–5% band of today's value (the band is fixed per code, and the series is the same on every run). The Holdings tab marks each line *Market* or *Simulated*.
+- **Assumptions:** quantity is not used. Each holding is valued at its reported market value and moved with its price series, and holdings are treated as unchanged over the price period. Values are in transaction currency as reported, with no FX conversion.
 - **Refreshing prices:** run `python3 tools/build_prices.py <new export.xlsx>` and commit the regenerated JSON.
+
+The older workbook layout (Holdings / Transactions / Cash_Flows / Benchmark_Constituents / Portfolio_Info sheets) is still accepted.
 
 ## Where prices come from
 

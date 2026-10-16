@@ -37,6 +37,13 @@
     <ol id="log" class="log" aria-live="polite"></ol>
     <p id="emptyState" class="empty">Upload a portfolio with the <span aria-hidden="true">⇧</span> button at the top right, or click <b>Sample</b> to view the sample portfolio.</p>
 
+    <div id="selectors" class="selectors" hidden>
+      <label for="selPortfolio">Portfolio</label>
+      <select id="selPortfolio"></select>
+      <label for="selBenchmark">Benchmark</label>
+      <select id="selBenchmark"><option value="PSEI">PSEi – PSE Composite Index</option></select>
+    </div>
+
     <section id="report" hidden>
       <div class="report-head">
         <div>
@@ -45,12 +52,14 @@
         </div>
       </div>
       <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="holdings" id="tabBtnHoldings" hidden>Holdings</button>
         <button role="tab" data-tab="summary" class="active">Summary</button>
         <button role="tab" data-tab="risk">VaR &amp; Risk</button>
         <button role="tab" data-tab="perf">Performance</button>
         <button role="tab" data-tab="attr">Attribution</button>
         <button role="tab" data-tab="dq">Data Quality <span id="dqCount" class="pill"></span></button>
       </nav>
+      <div class="tab-panel" id="tab-holdings"></div>
       <div class="tab-panel active" id="tab-summary"></div>
       <div class="tab-panel" id="tab-risk"></div>
       <div class="tab-panel" id="tab-perf"></div>

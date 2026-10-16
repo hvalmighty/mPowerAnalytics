@@ -69,7 +69,7 @@ function buildLocalPrices(model, yahooOf) {
   const out = {};
   for (const [sym, m] of Object.entries(by)) {
     const rows = [...m.values()].sort((a, b) => a.date.localeCompare(b.date));
-    out[sym] = { dates: rows.map((r) => r.date), close: rows.map((r) => r.close), adjclose: rows.map((r) => r.adj ?? r.close), volume: [], dividends: [], splits: [], name: sym, source: 'workbook' };
+    out[sym] = { dates: rows.map((r) => r.date), close: rows.map((r) => r.close), adjclose: rows.map((r) => r.adj ?? r.close), volume: [], dividends: [], splits: [], name: sym, source: rows[0].sim ? 'simulated' : 'workbook' };
   }
   return out;
 }
@@ -312,7 +312,7 @@ export function dataQuality(model, panel, fetched, book) {
     else if (obs < window * 0.95) { status = 'GAPS'; note = `${window - obs} missing days forward-filled or proxied`; }
     if (s.override) note += (note ? '; ' : '') + 'manual price override applied';
     const fd = fetched.data[yahoo]; const src = fd && (fd.source === 'workbook' ? 'workbook' : fd.provider || fd.source);
-    if (src) note = `[${src === 'workbook' ? (model.priceSource === 'file' ? 'price file' : 'Price_History sheet') : src === 'eodhd' ? 'EODHD' : src === 'demo' ? 'demo' : 'Yahoo'}] ` + note;
+    if (src) note = `[${src === 'simulated' ? 'simulated' : src === 'workbook' ? (model.priceSource === 'file' ? 'price file' : 'Price_History sheet') : src === 'eodhd' ? 'EODHD' : src === 'demo' ? 'demo' : 'Yahoo'}] ` + note;
     rows.push({ ticker, yahoo, role, status, note, obs, window, first: s.firstDate, last: s.lastDate, lastPx });
   };
   const held = book && book.tickers ? book.tickers : [];

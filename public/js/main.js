@@ -3,7 +3,8 @@ import { fetchPrices, buildPanel, buildBook, dataQuality } from './data.js';
 import { computeRisk } from './risk.js';
 import { computePerformance } from './performance.js';
 import { computeAttribution } from './attribution.js';
-import { renderSummary, renderRisk, renderPerformance, renderAttribution, renderDQ, destroyCharts } from './report.js';
+import { renderSummary, renderRisk, renderPerformance, renderAttribution, renderDQ, renderHoldings, destroyCharts } from './report.js';
+import { isPositionReport, parsePositionReport, buildModelFromPortfolio } from './pms.js';
 
 const $ = (id) => document.getElementById(id);
 // PSE_HOSTED is set by the single-file build (tools/build_hosted.mjs): no server,
@@ -14,12 +15,13 @@ let workbook = null, fileName = '', ctx = null, serverMode = 'live', isSample = 
 const priceWb = null; // prices are built in; a price-file upload may return later
 
 // Built-in prices (public/data/market_prices.json)
-let builtin = null, builtinInfo = null;
+let builtin = null, builtinInfo = null, builtinRaw = null;
+let pms = null; // parsed mPower position report (portfolio dropdown)
 const builtinReady = HOSTED ? Promise.resolve() : fetch('/data/market_prices.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
   if (!j || !j.dates) return;
   const rows = [];
   for (const [t, arr] of Object.entries(j.series)) arr.forEach((p, i) => { if (p > 0) rows.push({ date: j.dates[i], ticker: t, close: p, adj: null }); });
-  builtin = rows; builtinInfo = { n: Object.keys(j.series).length, from: j.from, to: j.to, source: j.source };
+  builtinRaw = j; builtin = rows; builtinInfo = { n: Object.keys(j.series).length, from: j.from, to: j.to, source: j.source };
 }).catch(() => {});
 const fmtD = (d) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 
@@ -43,7 +45,7 @@ if (HOSTED) {
 
 // ---- sample portfolio, shown until a portfolio is uploaded
 const demoish = () => HOSTED || serverMode === 'demo';
-const sampleName = () => (demoish() ? 'PSE_Portfolio_Sample.xlsx' : 'Portfolio_Template.xlsx');
+const sampleName = () => (demoish() ? 'PSE_Portfolio_Sample.xlsx' : 'Portfolio_Sample_mPower.xlsx');
 async function sampleBytes() {
   if (HOSTED) return Uint8Array.from(atob(window.PSE_SAMPLE_B64), (c) => c.charCodeAt(0)).buffer;
   const r = await fetch('/sample/' + sampleName());
@@ -87,6 +89,18 @@ async function loadBuffer(buf, name, sample) {
   try {
     workbook = XLSX.read(buf, { type: 'array' });
     fileName = name; isSample = sample;
+    pms = isPositionReport(workbook) ? parsePositionReport(workbook) : null;
+    const sel = $('selPortfolio');
+    sel.innerHTML = '';
+    if (pms && pms.portfolios.length) {
+      pms.portfolios.forEach((p, i) => { const o = document.createElement('option'); o.value = String(i); o.textContent = `${p.label} (${p.positions.length})`; sel.appendChild(o); });
+      $('selectors').hidden = false;
+      showTab('holdings');
+    } else {
+      $('selectors').hidden = true;
+      if (pms) { pms = null; log.innerHTML = ''; say(`${name}: no positions found under the Security / Market Value in Transaction Currency / Portfolio columns.`, 'err'); return false; }
+      showTab('summary');
+    }
     return true;
   } catch (e) {
     log.innerHTML = ''; say(`Could not read ${name} as Excel: ${e.message}`, 'err');
@@ -94,10 +108,21 @@ async function loadBuffer(buf, name, sample) {
   }
 }
 
-document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => {
-  document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('active', x === b));
-  document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + b.dataset.tab));
-}));
+function showTab(name) {
+  document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('active', x.dataset.tab === name));
+  document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + name));
+}
+document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+$('selPortfolio').addEventListener('change', () => run());
+$('selBenchmark').addEventListener('change', () => run());
+
+// Business-day calendar for the past year, used when no built-in price data is loaded (test build).
+function lastYearDates() {
+  const out = [], d = new Date(); d.setUTCFullYear(d.getUTCFullYear() - 1);
+  const end = new Date();
+  for (; d <= end; d.setUTCDate(d.getUTCDate() + 1)) if (d.getUTCDay() % 6) out.push(d.toISOString().slice(0, 10));
+  return out;
+}
 $('btnPrint').addEventListener('click', () => window.print());
 
 $('btnExcel').addEventListener('click', exportExcel);
@@ -108,10 +133,15 @@ async function run() {
   const btns = [$('btnUpload'), $('btnSample')]; btns.forEach((b) => { b.classList.add('busy'); b.disabled = true; }); log.innerHTML = '';
   let ok = false;
   try {
-    const model = parseWorkbook(workbook, priceWb, demoish() ? null : builtin);
+    let model;
+    if (pms) {
+      const pf = pms.portfolios[+$('selPortfolio').value || 0];
+      const bsel = $('selBenchmark');
+      model = buildModelFromPortfolio(pf, builtinRaw || { dates: lastYearDates(), series: {} }, { id: bsel.value, name: bsel.options[bsel.selectedIndex].textContent.replace(/^PSEi – /, '') + ' (PSEi)' });
+    } else model = parseWorkbook(workbook, priceWb, demoish() ? null : builtin);
     if (!demoish() && !model.priceHistory.length) { say('No prices available: the built-in price data could not be loaded. Reload the page and try again.', 'err'); return; }
-    say(`Read ${model.holdings.length} holding rows${model.transactions.length ? `, ${model.transactions.length} transactions` : ''}${model.cashFlows.length ? `, ${model.cashFlows.length} cash flows` : ''}${model.benchmark.length ? `, ${model.benchmark.length} benchmark constituents` : ''}.`);
-    if (model.priceRange) say(`Prices: ${model.priceRange.securities} securities, ${model.priceRange.min} → ${model.priceRange.max} ${model.usedBuiltin ? '(built in)' : 'from the Price_History sheet'}.`);
+    if (!pms) say(`Read ${model.holdings.length} holding rows${model.transactions.length ? `, ${model.transactions.length} transactions` : ''}${model.cashFlows.length ? `, ${model.cashFlows.length} cash flows` : ''}${model.benchmark.length ? `, ${model.benchmark.length} benchmark constituents` : ''}.`);
+    if (model.priceRange && !pms) say(`Prices: ${model.priceRange.securities} securities, ${model.priceRange.min} → ${model.priceRange.max} ${model.usedBuiltin ? '(built in)' : 'from the Price_History sheet'}.`);
     model.info.forEach((w) => say(w));
     model.warnings.forEach((w) => say(w, 'warn'));
     if (model.errors.length) { log.innerHTML = ''; model.errors.forEach((e) => say(e, 'err')); say(`Fix the errors above in ${fileName} and upload it again with the upload button (top right).`, 'err'); return; }
@@ -157,9 +187,11 @@ function render() {
   const c = ctx.model.config;
   destroyCharts();
   $('report').hidden = false; $('emptyState').hidden = true;
-  const title = isSample ? 'Sample portfolio' : c.hasInfoSheet ? c.name : fileName.replace(/\.[^.]+$/, '');
+  const title = pms ? c.name : isSample ? 'Sample portfolio' : c.hasInfoSheet ? c.name : fileName.replace(/\.[^.]+$/, '');
   $('rTitle').textContent = `${title}${c.id && !isSample ? ' · ' + c.id : ''}`;
-  $('rMeta').textContent = `Period ${ctx.book.dates[0]} → ${ctx.book.dates[ctx.book.T - 1]} · valuation ${c.valuationDate} · benchmark ${c.benchmarkName}` + (isSample ? '' : ` · portfolio ${fileName}`);
+  $('rMeta').textContent = `Period ${ctx.book.dates[0]} → ${ctx.book.dates[ctx.book.T - 1]} · valuation ${c.valuationDate} · benchmark ${c.benchmarkName}` + (isSample ? '' : ` · file ${fileName}`);
+  $('tabBtnHoldings').hidden = !ctx.model.positions;
+  renderHoldings($('tab-holdings'), ctx);
   const issues = ctx.msgs.errors.length + ctx.msgs.warnings.length + ctx.dq.filter((d) => d.status !== 'OK').length;
   $('dqCount').textContent = issues ? String(issues) : '';
   renderSummary($('tab-summary'), ctx);
@@ -181,11 +213,12 @@ function exportExcel() {
   const r2 = (x) => (x == null || !isFinite(x) ? null : Math.round(x * 100) / 100);
   add('Summary', [
     { Item: 'Portfolio', Value: model.config.name }, { Item: 'Valuation date', Value: model.config.valuationDate },
-    { Item: 'Data source', Value: ctx.fetched.mode === 'demo' ? 'DEMO synthetic prices' : 'Yahoo Finance' },
+    { Item: 'Data source', Value: ctx.fetched.mode === 'demo' ? 'DEMO synthetic prices' : model.benchmarkSimulated ? 'Built-in market prices; simulated where no price; simulated PSEi' : 'Built-in market prices' },
     ...(risk && !risk.error ? [{ Item: 'NAV', Value: r2(risk.totalNAV) }] : []),
     ...(perf ? [{ Item: 'TWR', Value: r4(perf.twr) }, { Item: 'Benchmark return', Value: r4(perf.bench) }, { Item: 'Active return', Value: r4(perf.active) }, { Item: 'XIRR', Value: r4(perf.irr) }] : []),
     ...(attr && !attr.skipped ? [{ Item: 'Allocation', Value: r4(attr.totals.alloc) }, { Item: 'Selection', Value: r4(attr.totals.sel) }, { Item: 'Interaction', Value: r4(attr.totals.inter) }] : []),
   ]);
+  if (model.positions) add('Holdings', model.positions.map((p) => ({ Security: p.security, 'Security Name': p.name, 'Asset Class': p.assetClass, 'Book Cost in Transaction Currency': p.bookCost, 'Market Value in Transaction Currency': p.marketValue, Portfolio: p.portfolio })));
   if (risk && !risk.error) {
     add('VaR', risk.table.map((x) => ({ Confidence: x.conf, Horizon_Days: x.horizon, Hist_VaR: r2(x.histVar), Hist_ES: r2(x.histEs), Param_VaR: r2(x.paraVar), Param_ES: r2(x.paraEs), MC_VaR: r2(x.mcVar), MC_ES: r2(x.mcEs) })));
     add('Risk_Contribution', risk.contrib.map((x) => ({ Ticker: x.ticker, Name: x.name, Sector: x.sector, Market_Value: r2(x.mv), Weight: r4(x.weight), Ann_Vol: r4(x.annVol), Standalone_VaR: r2(x.standalone), Marginal_VaR: r4(x.marginal), Component_VaR: r2(x.component), Pct_of_VaR: r4(x.componentPct), Incremental_VaR: r2(x.incremental), ES_Contribution: r2(x.histEsContrib) })));

@@ -166,6 +166,11 @@ function readPrices(wb, ctx, anySheet, label) {
   return out;
 }
 
+// Settings with every default, dates taken from the price range (used by the mPower position report).
+export function defaultConfig(priceRange) {
+  return readConfig({ SheetNames: [], Sheets: {} }, { errors: [], warnings: [], info: [] }, priceRange);
+}
+
 // builtin: price rows shipped with the app (public/data/market_prices.json), used when
 // neither an uploaded price file nor a Price_History sheet is given.
 export function parseWorkbook(wb, priceWb = null, builtin = null) {

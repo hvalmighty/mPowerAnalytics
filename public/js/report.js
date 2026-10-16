@@ -250,7 +250,7 @@ export function renderPerformance(el, ctx) {
     <li>Daily valuation: quantity × Yahoo close (unadjusted for dividends) + cash. Dividends are credited as cash on the ex-date${ctx.model.config.autoDividends ? ' (taken from Yahoo when the PMS file has no DIVIDEND rows for that stock)' : ''}.</li>
     <li>TWR: r<sub>t</sub> = (V<sub>t</sub> − V<sub>t−1</sub> − CF<sub>t</sub>) / V<sub>t−1</sub>, client flows assumed at end of day, chain-linked daily.</li>
     <li>Money-weighted return: XIRR of opening NAV, client flows and closing NAV.</li>
-    <li>Benchmark: ${esc(p.benchmarkLabel)} from Yahoo (${esc(ctx.model.config.benchmarkSymbol)}). The PSEi is a price index, so a dividend-receiving portfolio has a small structural edge over it.</li></ul>`) + '</div>';
+    <li>Benchmark: ${ctx.model.benchmarkSimulated ? `${esc(ctx.model.config.benchmarkName)}, simulated within a 3–5% band of today's level` : `${esc(p.benchmarkLabel)} from Yahoo (${esc(ctx.model.config.benchmarkSymbol)}). The PSEi is a price index, so a dividend-receiving portfolio has a small structural edge over it`}.</li></ul>`) + '</div>';
   el.innerHTML = html;
 
   mk('cGrowth', growthChart(p));
@@ -353,4 +353,26 @@ export function renderDQ(el, ctx) {
       { h: 'Ex-date', l: true, f: (x) => x.date }, { h: 'Ticker', l: true, f: (x) => esc(x.ticker) }, { h: 'Per share', f: (x) => fmt.num(x.dps, 4) }, { h: 'Shares', f: (x) => fmt.qty(x.qty) }, { h: 'Amount', f: (x) => fmt.php(x.amount) },
     ], book.autoDivs) : '<p class="muted">None (PMS dividend rows used, or auto-dividends switched off).</p>') + '</div>';
   el.innerHTML = html;
+}
+
+// ===================================================================== HOLDINGS (mPower position report)
+export function renderHoldings(el, ctx) {
+  const pos = ctx.model.positions;
+  if (!pos) { el.innerHTML = ''; return; }
+  const simulated = new Set(Object.entries(ctx.fetched.data).filter(([, d]) => d.source === 'simulated').map(([k]) => k.replace(/\.PS$/, '').replace(/#\d+$/, '')));
+  const tot = pos.reduce((o, p) => ({ book: o.book + (p.bookCost || 0), mv: o.mv + (p.marketValue || 0) }), { book: 0, mv: 0 });
+  const groups = [...new Set(pos.map((p) => p.assetClass))];
+  const rows = [];
+  for (const g of groups) {
+    rows.push({ group: g });
+    for (const p of pos.filter((x) => x.assetClass === g)) rows.push(p);
+  }
+  const cell = (r, f) => (r.group ? '' : f(r));
+  const body = rows.map((r) => r.group
+    ? `<tr class="grp"><td class="l" colspan="6">${esc(r.group)}</td></tr>`
+    : `<tr><td class="l"><b>${esc(r.security)}</b></td><td class="l wrap">${esc(r.name)}</td><td>${fmt.num(r.bookCost, 2)}</td><td>${fmt.num(r.marketValue, 2)}</td><td class="l">${esc(r.portfolio)}</td><td class="l">${simulated.has(r.security.trim().toUpperCase()) ? '<span class="tag-sim">Simulated</span>' : '<span class="tag-mkt">Market</span>'}</td></tr>`).join('');
+  el.innerHTML = '<div class="kpis">' + kpi('Positions', String(pos.length)) + kpi('Book cost', fmt.num(tot.book, 2), 'transaction currency') + kpi('Market value', fmt.num(tot.mv, 2), 'transaction currency') +
+    kpi('Unrealised gain', fmt.num(tot.mv - tot.book, 2), tot.book ? fmt.pct(tot.mv / tot.book - 1) : '') + '</div>' +
+    '<div class="grid1">' + panel('Holdings', `<div class="tbl-wrap"><table><thead><tr><th class="l">Security</th><th class="l">Security Name</th><th>Book Cost in Transaction Currency</th><th>Market Value in Transaction Currency</th><th class="l">Portfolio</th><th class="l">Price source</th></tr></thead><tbody>${body}<tr class="total"><td class="l">Total</td><td></td><td>${fmt.num(tot.book, 2)}</td><td>${fmt.num(tot.mv, 2)}</td><td></td><td></td></tr></tbody></table></div>`,
+      'Grouped by asset class as in the mPower report. Price source: Market = built-in market prices; Simulated = no market price for the code, so a series within 3–5% of today\'s value is used.') + '</div>';
 }
