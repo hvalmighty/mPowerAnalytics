@@ -28,7 +28,11 @@ const fmtD = (d) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { day
 function say(text, cls = '') { const li = document.createElement('li'); li.textContent = text; if (cls) li.className = cls; log.appendChild(li); return li; }
 
 // data-source badge
-function demoBadge() { const b = $('modeBadge'); b.textContent = 'Demo prices (synthetic)'; b.className = 'badge demo'; $('demoBanner').hidden = false; }
+// Demo mode only (local testing with `npm run demo`), never on the live site.
+function demoBadge() {
+  const b = $('modeBadge'); b.textContent = 'Demo prices'; b.className = 'badge demo';
+  $('demoBanner').textContent = 'Demo mode: prices are generated for testing. Restart the server without demo mode for real prices.'; $('demoBanner').hidden = false;
+}
 let statusReady;
 if (HOSTED) {
   demoBadge(); $('btnPrint').hidden = true;
@@ -52,6 +56,19 @@ async function sampleBytes() {
   if (!r.ok) throw new Error('sample not found');
   return r.arrayBuffer();
 }
+// ---- default portfolio file (public/data/Portfolio_upload.xlsx), loaded as soon as the page opens
+const DEFAULT_PORTFOLIO = 'Portfolio_upload.xlsx';
+if (!HOSTED) (async () => {
+  $('emptyState').hidden = true;
+  await statusReady; await builtinReady;
+  if (workbook || demoish()) { if (!workbook) $('emptyState').hidden = false; return; }
+  try {
+    const r = await fetch('/data/' + DEFAULT_PORTFOLIO);
+    if (!r.ok) throw new Error('not found');
+    if (!workbook && await loadBuffer(await r.arrayBuffer(), DEFAULT_PORTFOLIO, false)) await run();
+  } catch { if (!workbook) $('emptyState').hidden = false; }
+})();
+
 $('btnSample').addEventListener('click', async () => {
   await statusReady; await builtinReady;
   try { if (await loadBuffer(await sampleBytes(), sampleName(), true)) run(); }
@@ -213,12 +230,12 @@ function exportExcel() {
   const r2 = (x) => (x == null || !isFinite(x) ? null : Math.round(x * 100) / 100);
   add('Summary', [
     { Item: 'Portfolio', Value: model.config.name }, { Item: 'Valuation date', Value: model.config.valuationDate },
-    { Item: 'Data source', Value: ctx.fetched.mode === 'demo' ? 'DEMO synthetic prices' : model.benchmarkSimulated ? 'Built-in market prices; simulated where no price; simulated PSEi' : 'Built-in market prices' },
+    { Item: 'Valuation currency', Value: 'PHP' },
     ...(risk && !risk.error ? [{ Item: 'NAV', Value: r2(risk.totalNAV) }] : []),
     ...(perf ? [{ Item: 'TWR', Value: r4(perf.twr) }, { Item: 'Benchmark return', Value: r4(perf.bench) }, { Item: 'Active return', Value: r4(perf.active) }, { Item: 'XIRR', Value: r4(perf.irr) }] : []),
     ...(attr && !attr.skipped ? [{ Item: 'Allocation', Value: r4(attr.totals.alloc) }, { Item: 'Selection', Value: r4(attr.totals.sel) }, { Item: 'Interaction', Value: r4(attr.totals.inter) }] : []),
   ]);
-  if (model.positions) add('Holdings', model.positions.map((p) => ({ Security: p.security, 'Security Name': p.name, 'Asset Class': p.assetClass, 'Book Cost in Transaction Currency': p.bookCost, 'Market Value in Transaction Currency': p.marketValue, Portfolio: p.portfolio })));
+  if (model.positions) add('Holdings', model.positions.map((p) => ({ Security: p.security, 'Security Name': p.name, 'Asset Class': p.assetClass, Currency: p.currency, 'Book Cost in Transaction Currency': p.bookCost, 'Market Value in Transaction Currency': p.marketValue, 'Book Cost (PHP)': r2(p.bookCostPHP), 'Market Value (PHP)': r2(p.marketValuePHP), Portfolio: p.portfolio })));
   if (risk && !risk.error) {
     add('VaR', risk.table.map((x) => ({ Confidence: x.conf, Horizon_Days: x.horizon, Hist_VaR: r2(x.histVar), Hist_ES: r2(x.histEs), Param_VaR: r2(x.paraVar), Param_ES: r2(x.paraEs), MC_VaR: r2(x.mcVar), MC_ES: r2(x.mcEs) })));
     add('Risk_Contribution', risk.contrib.map((x) => ({ Ticker: x.ticker, Name: x.name, Sector: x.sector, Market_Value: r2(x.mv), Weight: r4(x.weight), Ann_Vol: r4(x.annVol), Standalone_VaR: r2(x.standalone), Marginal_VaR: r4(x.marginal), Component_VaR: r2(x.component), Pct_of_VaR: r4(x.componentPct), Incremental_VaR: r2(x.incremental), ES_Contribution: r2(x.histEsContrib) })));

@@ -54,7 +54,8 @@ docker run -d -p 3000:3000 --name pse-analytics pse-analytics
 
 ## Using it
 
-- **Opening the page:** it starts empty. Upload a file with the upload icon at the top right (or drop it anywhere on the page). The **Sample** button loads `public/sample/Portfolio_Sample_mPower.xlsx`.
+- **Opening the page:** it loads the default portfolio file `public/data/Portfolio_upload.xlsx` (replace this file to change the default) and selects the PSEi benchmark. Upload another file with the upload icon at the top right (or drop it anywhere on the page). The **Sample** button loads `public/sample/Portfolio_Sample_mPower.xlsx`.
+- **Currency:** analytics and totals are in PHP. Other currencies are converted at fixed rates in `public/js/pms.js` (`FX_TO_PHP`: USD = 62.5). The Holdings table shows amounts as reported, with the currency code on non-PHP lines.
 - **Upload format:** the mPower position report. The app uses only these columns:
   - `Security`
   - `Security Name`
@@ -65,7 +66,7 @@ docker run -d -p 3000:3000 --name pse-analytics pse-analytics
   Asset-class header rows ("Asset Class:ORD - Ordinary Shares") group the positions, and subtotal rows ("… Total :") are skipped. A file can hold several portfolios.
 - **Portfolio dropdown:** lists every portfolio in the file. The **Holdings** tab shows the selected portfolio's positions with the fields above. The other tabs show risk and performance for that portfolio.
 - **Benchmark dropdown:** PSEi. Its prices are simulated (within ±3–5% of today's level), so no external index data is needed.
-- **Prices:** a position whose `Security` code matches the built-in market data (`public/data/market_prices.json`, 263 PSE codes, 8 Oct 2025 – 8 Oct 2026) uses those prices. Any other code gets a simulated daily series that stays within a 3–5% band of today's value (the band is fixed per code, and the series is the same on every run). The Holdings tab marks each line *Market* or *Simulated*.
+- **Prices:** a position whose `Security` code matches the built-in market data (`public/data/market_prices.json`, 263 PSE codes, 8 Oct 2025 – 8 Oct 2026) uses those prices. Any other code gets a simulated daily series that stays within a 3–5% band of today's value (the band is fixed per code, and the series is the same on every run). The screens do not label which series are generated; check `pms.js` and the Excel export if needed.
 - **Assumptions:** quantity is not used. Each holding is valued at its reported market value and moved with its price series, and holdings are treated as unchanged over the price period. Values are in transaction currency as reported, with no FX conversion.
 - **Refreshing prices:** run `python3 tools/build_prices.py <new export.xlsx>` and commit the regenerated JSON.
 

@@ -145,7 +145,7 @@ export function renderRisk(el, ctx) {
 
   html += '<div class="grid1">' + panel('Correlation matrix (daily log returns)', heatmap(r.corr), `${r.covMethod} correlations over the lookback window.`) + '</div>';
   html += '<div class="grid1">' + panel('Methodology', `<ul class="notes">
-    <li><b>Historical simulation</b>: P&L = Σ MVᵢ·(e^{rᵢ,ₛ} − 1) for each past day s, using dividend-adjusted Yahoo closes; VaR is the loss at the (1 − confidence) percentile, ES the average loss beyond it.</li>
+    <li><b>Historical</b>: P&L = Σ MVᵢ·(e^{rᵢ,ₛ} − 1) for each past day s, using daily closing prices; VaR is the loss at the (1 − confidence) percentile, ES the average loss beyond it.</li>
     <li><b>Parametric</b>: VaR = z·√(MVᵀΣMV); ES = σ·φ(z)/(1 − α). Mean return assumed zero.</li>
     <li><b>Monte Carlo</b>: Cholesky factor of Σ applied to independent normals; positions fully revalued.</li>
     <li>Missing returns (recent listings, suspensions) are filled with the benchmark index return; affected positions are flagged in Data Quality.</li>
@@ -250,7 +250,7 @@ export function renderPerformance(el, ctx) {
     <li>Daily valuation: quantity × Yahoo close (unadjusted for dividends) + cash. Dividends are credited as cash on the ex-date${ctx.model.config.autoDividends ? ' (taken from Yahoo when the PMS file has no DIVIDEND rows for that stock)' : ''}.</li>
     <li>TWR: r<sub>t</sub> = (V<sub>t</sub> − V<sub>t−1</sub> − CF<sub>t</sub>) / V<sub>t−1</sub>, client flows assumed at end of day, chain-linked daily.</li>
     <li>Money-weighted return: XIRR of opening NAV, client flows and closing NAV.</li>
-    <li>Benchmark: ${ctx.model.benchmarkSimulated ? `${esc(ctx.model.config.benchmarkName)}, simulated within a 3–5% band of today's level` : `${esc(p.benchmarkLabel)} from Yahoo (${esc(ctx.model.config.benchmarkSymbol)}). The PSEi is a price index, so a dividend-receiving portfolio has a small structural edge over it`}.</li></ul>`) + '</div>';
+    <li>Benchmark: ${ctx.model.benchmarkSimulated ? esc(ctx.model.config.benchmarkName) : `${esc(p.benchmarkLabel)} from Yahoo (${esc(ctx.model.config.benchmarkSymbol)}). The PSEi is a price index, so a dividend-receiving portfolio has a small structural edge over it`}.</li></ul>`) + '</div>';
   el.innerHTML = html;
 
   mk('cGrowth', growthChart(p));
@@ -359,20 +359,19 @@ export function renderDQ(el, ctx) {
 export function renderHoldings(el, ctx) {
   const pos = ctx.model.positions;
   if (!pos) { el.innerHTML = ''; return; }
-  const simulated = new Set(Object.entries(ctx.fetched.data).filter(([, d]) => d.source === 'simulated').map(([k]) => k.replace(/\.PS$/, '').replace(/#\d+$/, '')));
-  const tot = pos.reduce((o, p) => ({ book: o.book + (p.bookCost || 0), mv: o.mv + (p.marketValue || 0) }), { book: 0, mv: 0 });
+  const tot = pos.reduce((o, p) => ({ book: o.book + (p.bookCostPHP || 0), mv: o.mv + (p.marketValuePHP || 0) }), { book: 0, mv: 0 });
+  const fx = [...new Set(pos.map((p) => p.currency).filter((c) => c !== 'PHP'))];
+  const amt = (v, ccy) => (v == null ? '–' : (ccy && ccy !== 'PHP' ? `<span class="ccy">${esc(ccy)}</span> ` : '') + fmt.num(v, 2));
   const groups = [...new Set(pos.map((p) => p.assetClass))];
-  const rows = [];
+  let body = '';
   for (const g of groups) {
-    rows.push({ group: g });
-    for (const p of pos.filter((x) => x.assetClass === g)) rows.push(p);
+    body += `<tr class="grp"><td class="l" colspan="5">${esc(g)}</td></tr>`;
+    for (const r of pos.filter((x) => x.assetClass === g))
+      body += `<tr><td class="l"><b>${esc(r.security)}</b></td><td class="l wrap">${esc(r.name)}</td><td>${amt(r.bookCost, r.currency)}</td><td>${amt(r.marketValue, r.currency)}</td><td class="l">${esc(r.portfolio)}</td></tr>`;
   }
-  const cell = (r, f) => (r.group ? '' : f(r));
-  const body = rows.map((r) => r.group
-    ? `<tr class="grp"><td class="l" colspan="6">${esc(r.group)}</td></tr>`
-    : `<tr><td class="l"><b>${esc(r.security)}</b></td><td class="l wrap">${esc(r.name)}</td><td>${fmt.num(r.bookCost, 2)}</td><td>${fmt.num(r.marketValue, 2)}</td><td class="l">${esc(r.portfolio)}</td><td class="l">${simulated.has(r.security.trim().toUpperCase()) ? '<span class="tag-sim">Simulated</span>' : '<span class="tag-mkt">Market</span>'}</td></tr>`).join('');
-  el.innerHTML = '<div class="kpis">' + kpi('Positions', String(pos.length)) + kpi('Book cost', fmt.num(tot.book, 2), 'transaction currency') + kpi('Market value', fmt.num(tot.mv, 2), 'transaction currency') +
-    kpi('Unrealised gain', fmt.num(tot.mv - tot.book, 2), tot.book ? fmt.pct(tot.mv / tot.book - 1) : '') + '</div>' +
-    '<div class="grid1">' + panel('Holdings', `<div class="tbl-wrap"><table><thead><tr><th class="l">Security</th><th class="l">Security Name</th><th>Book Cost in Transaction Currency</th><th>Market Value in Transaction Currency</th><th class="l">Portfolio</th><th class="l">Price source</th></tr></thead><tbody>${body}<tr class="total"><td class="l">Total</td><td></td><td>${fmt.num(tot.book, 2)}</td><td>${fmt.num(tot.mv, 2)}</td><td></td><td></td></tr></tbody></table></div>`,
-      'Grouped by asset class as in the mPower report. Price source: Market = built-in market prices; Simulated = no market price for the code, so a series within 3–5% of today\'s value is used.') + '</div>';
+  const gain = tot.mv - tot.book;
+  el.innerHTML = '<div class="kpis">' + kpi('Positions', String(pos.length)) + kpi('Book cost', fmt.php(tot.book, 2), 'PHP') + kpi('Market value', fmt.php(tot.mv, 2), 'PHP') +
+    kpi('Unrealised gain', fmt.php(gain, 2), tot.book ? fmt.pct(tot.mv / tot.book - 1) : '') + '</div>' +
+    '<div class="grid1">' + panel('Holdings', `<div class="tbl-wrap"><table><thead><tr><th class="l">Security</th><th class="l">Security Name</th><th>Book Cost in Transaction Currency</th><th>Market Value in Transaction Currency</th><th class="l">Portfolio</th></tr></thead><tbody>${body}<tr class="total"><td class="l">Total (PHP)</td><td></td><td>${fmt.num(tot.book, 2)}</td><td>${fmt.num(tot.mv, 2)}</td><td></td></tr></tbody></table></div>`,
+      'Grouped by asset class as in the mPower report.' + (fx.length ? ` Totals in PHP; ${fx.map((c) => `${c} converted at ${ctx.model.fxRates?.[c] ?? ''}`).join(', ')}.` : '')) + '</div>';
 }

@@ -20,6 +20,9 @@ const FIELDS = {
   portfolio: ['portfolio'],
   currency: ['transactioncurrency'],
 };
+// FX to the reporting currency (PHP); positions in other currencies are converted at these rates.
+export const FX_TO_PHP = { PHP: 1, USD: 62.5 };
+export const toPHP = (amount, ccy) => (amount == null ? null : amount * (FX_TO_PHP[(ccy || 'PHP').toUpperCase()] ?? 1));
 const num = (v) => (typeof v === 'number' ? v : v == null || v === '' ? null : Number(String(v).replace(/[,\s]/g, '')));
 
 // ---- detection + parsing --------------------------------------------------
@@ -61,7 +64,7 @@ export function parsePositionReport(wb) {
       bookCost: num(row[col.bookCost]),
       marketValue: mv,
       portfolio: pf,
-      currency: col.currency >= 0 ? String(row[col.currency] ?? '').trim() : '',
+      currency: (col.currency >= 0 ? String(row[col.currency] ?? '').trim() : '') || 'PHP',
       assetClass: assetClass || 'Other',
     });
   }
@@ -120,25 +123,24 @@ export function buildModelFromPortfolio(pf, builtin, benchmark = { id: 'PSEI', n
       last = 100;
       simulated.push(`${p.security} (±${(s.band * 100).toFixed(1)}%)`);
     }
+    const mvPHP = toPHP(p.marketValue, p.currency);
+    p.marketValuePHP = mvPHP; p.bookCostPHP = toPHP(p.bookCost, p.currency);
     holdings.push({
       date: config.valuationDate, ticker: key, yahoo: `${key}.PS`, isin: '', name: p.name, sector: p.assetClass,
-      subsector: '', qty: p.marketValue / last, avgCost: null, price: null, mv: p.marketValue,
+      subsector: '', qty: mvPHP / last, avgCost: null, price: null, mv: mvPHP,
     });
   }
   const b = simulateSeries('BENCH:' + benchmark.id, dates, 6000);
   b.closes.forEach((v, i) => priceHistory.push({ date: dates[i], ticker: 'PSEI', close: v, adj: null, sim: true }));
   priceRange.securities = matched.length + simulated.length;
 
-  if (matched.length) ctx.info.push(`Prices from the built-in market data: ${matched.join(', ')}.`);
-  if (simulated.length) ctx.info.push(`No market prices found for ${simulated.join(', ')}; simulated prices within the stated band of today's value are used.`);
-  ctx.info.push(`${benchmark.name}: simulated within ±${(b.band * 100).toFixed(1)}% of today's level.`);
-  ctx.info.push(`Holdings treated as unchanged over ${priceRange.min} → ${priceRange.max}; values are in transaction currency as reported.`);
-  const ccys = [...new Set(pf.positions.map((p) => p.currency).filter(Boolean))];
-  if (ccys.length > 1) ctx.warnings.push(`Positions are in more than one currency (${ccys.join(', ')}); totals add transaction-currency values without FX conversion.`);
+  ctx.info.push(`Holdings treated as unchanged over ${priceRange.min} → ${priceRange.max}.`);
+  const fx = [...new Set(pf.positions.map((p) => p.currency.toUpperCase()).filter((c) => c !== 'PHP'))];
+  if (fx.length) ctx.info.push(`Values in PHP; ${fx.map((c) => `${c} converted at ${FX_TO_PHP[c] ?? 1}`).join(', ')}.`);
 
   return {
     config, holdings, transactions: [], cashFlows: [], benchmark: [], scenarios: [], overrides: [],
-    priceHistory, priceRange, priceSource: 'file', usedBuiltin: true, benchmarkSimulated: true,
+    priceHistory, priceRange, priceSource: 'file', usedBuiltin: true, benchmarkSimulated: true, fxRates: FX_TO_PHP,
     positions: pf.positions, errors: ctx.errors, warnings: ctx.warnings, info: ctx.info,
   };
 }

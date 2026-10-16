@@ -312,7 +312,7 @@ export function dataQuality(model, panel, fetched, book) {
     else if (obs < window * 0.95) { status = 'GAPS'; note = `${window - obs} missing days forward-filled or proxied`; }
     if (s.override) note += (note ? '; ' : '') + 'manual price override applied';
     const fd = fetched.data[yahoo]; const src = fd && (fd.source === 'workbook' ? 'workbook' : fd.provider || fd.source);
-    if (src) note = `[${src === 'simulated' ? 'simulated' : src === 'workbook' ? (model.priceSource === 'file' ? 'price file' : 'Price_History sheet') : src === 'eodhd' ? 'EODHD' : src === 'demo' ? 'demo' : 'Yahoo'}] ` + note;
+    if (src && src !== 'simulated') note = `[${src === 'workbook' ? (model.priceSource === 'file' ? 'price file' : 'Price_History sheet') : src === 'eodhd' ? 'EODHD' : src === 'demo' ? 'demo' : 'Yahoo'}] ` + note;
     rows.push({ ticker, yahoo, role, status, note, obs, window, first: s.firstDate, last: s.lastDate, lastPx });
   };
   const held = book && book.tickers ? book.tickers : [];
