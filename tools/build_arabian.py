@@ -120,7 +120,6 @@ def main(path):
     for c in cons:
         if c["ticker"] in series: continue
         series[c["ticker"]] = simulate(c["ticker"], c["anchor"], c["sector"], fx[c["ccy"]] if not c["proxy"] else 1.0)
-    series["CASH"] = [1.0] * n
     # benchmark index: fixed-weight, rebased to 100 at the start
     idx = [0.0] * n
     for c in cons:
@@ -150,9 +149,7 @@ def main(path):
     ws.cell(row=2, column=1).font = Font(bold=True, color="19395C")
     for r in holding_rows:
         ws.append([r["code"], r["name"], r["book_tx"], r["mv_tx"], pf_label, r["ccy"], r["qty"], r["price"], r["sector"], "USD", r["book_usd"], r["mv_usd"]])
-    ws.append(["Asset Class:CSH - Cash"])
-    ws.cell(row=ws.max_row, column=1).font = Font(bold=True, color="19395C")
-    ws.append(["CASH", "Cash / net current assets", cash_usd, cash_usd, pf_label, "USD", cash_usd, 1.0, "Cash", "USD", cash_usd, cash_usd])
+    # Cash is not included: the statement's negative cash balance is ignored (valuation on securities only).
     for row in ws.iter_rows(min_row=3, min_col=3, max_col=4):
         for c in row: c.number_format = "#,##0.00"
     for i, w in enumerate([12, 36, 26, 30, 36, 14, 16, 12, 24, 16, 26, 30], 1):
