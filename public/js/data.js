@@ -139,7 +139,7 @@ export function buildBook(model, panel, fetched) {
 
   // Security master
   const meta = {};
-  for (const h of holdings) if (h.ticker !== 'CASH') meta[h.ticker] = { ticker: h.ticker, name: h.name, sector: h.sector, isin: h.isin, yahoo: h.yahoo };
+  for (const h of holdings) if (h.ticker !== 'CASH') meta[h.ticker] = { ticker: h.ticker, name: h.name, sector: h.sector, currency: h.currency || 'Unclassified', isin: h.isin, yahoo: h.yahoo };
   for (const t of transactions) if (t.ticker !== 'CASH' && !meta[t.ticker]) {
     const b = model.benchmark.find((x) => x.ticker === t.ticker);
     meta[t.ticker] = { ticker: t.ticker, name: b ? b.name : t.ticker, sector: b ? b.sector : 'Unclassified', yahoo: fetched.yahooOf[t.ticker] };

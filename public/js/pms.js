@@ -156,7 +156,7 @@ export function buildModelFromPortfolio(pf, builtin, benchmark = { id: 'PSEI', n
     p.bookCostBase = p.bookCostPortfolio != null && (!p.portfolioCurrency || p.portfolioCurrency === base) ? p.bookCostPortfolio : conv(p.bookCost, p.currency, fx);
     holdings.push({
       date: config.valuationDate, ticker: l.key, yahoo: l.code === 'CASH' ? 'CASH' : `${l.key}${suffix}`, isin: '', name: p.name,
-      sector: p.sector || p.assetClass, subsector: '', qty: mvB / end, avgCost: null, price: null, mv: mvB,
+      sector: p.sector || p.assetClass, currency: p.currency, subsector: '', qty: mvB / end, avgCost: null, price: null, mv: mvB,
     });
   }
 
@@ -165,7 +165,7 @@ export function buildModelFromPortfolio(pf, builtin, benchmark = { id: 'PSEI', n
   if (bmSpec) {
     const pushed = new Set(priceHistory.map((r) => r.ticker));
     for (const c of bmSpec.constituents) {
-      benchmarkList.push({ ticker: c.ticker, yahoo: c.yahoo, name: c.name, sector: c.sector, weight: c.weight });
+      benchmarkList.push({ ticker: c.ticker, yahoo: c.yahoo, name: c.name, sector: c.sector, country: c.country, currency: c.currency, weight: c.weight });
       const arr = builtin.series[c.ticker];
       if (!pushed.has(c.ticker) && arr) { pushed.add(c.ticker); for (let i = s0; i <= s1; i++) priceHistory.push({ date: all[i], ticker: c.ticker, close: arr[i], adj: null }); }
     }

@@ -212,9 +212,11 @@ async function run() {
     try { risk = computeRisk(model, panel, book); msgs.warnings.push(...(risk.warnings || [])); } catch (e) { risk = { error: 'VaR failed: ' + e.message }; console.error(e); }
     try { perf = computePerformance(model, panel, book); } catch (e) { msgs.errors.push('Performance failed: ' + e.message); console.error(e); }
     try { attr = computeAttribution(model, panel, book); msgs.warnings.push(...(attr.warnings || [])); } catch (e) { attr = { skipped: 'Attribution failed: ' + e.message }; console.error(e); }
+    let attrCcy;
+    try { attrCcy = computeAttribution(model, panel, book, 'currency'); } catch (e) { attrCcy = { skipped: 'Currency attribution failed: ' + e.message }; console.error(e); }
     const dq = dataQuality(model, panel, fetched, book);
 
-    ctx = { model, fetched, panel, book, risk, perf, attr, dq, msgs };
+    ctx = { model, fetched, panel, book, risk, perf, attr, attrCcy, dq, msgs };
     window.pseReport = ctx; // inspect every intermediate result from the browser console
     render();
     ok = true;
@@ -281,6 +283,9 @@ function exportExcel() {
   if (attr && !attr.skipped) {
     add('Attribution', attr.rows.map((x) => ({ Sector: x.sector, Port_Weight: r4(x.wp), Bench_Weight: r4(x.wb), Port_Return: r4(x.rp), Bench_Return: r4(x.rb), Allocation: r4(x.alloc), Selection: r4(x.sel), Interaction: r4(x.inter), Total: r4(x.total) })));
     add('Attribution_Monthly', attr.monthly.map((x) => ({ Month: x.month, Portfolio: r4(x.port), Benchmark: r4(x.bench), Allocation: r4(x.alloc), Selection: r4(x.sel), Interaction: r4(x.inter) })));
+  }
+  if (ctx.attrCcy && !ctx.attrCcy.skipped) {
+    add('Currency_Attribution', ctx.attrCcy.rows.map((x) => ({ Currency: x.segment, Port_Weight: r4(x.wp), Bench_Weight: r4(x.wb), Port_Return: r4(x.rp), Bench_Return: r4(x.rb), Allocation: r4(x.alloc), Selection: r4(x.sel), Interaction: r4(x.inter), Total: r4(x.total) })));
   }
   add('Data_Quality', dq.map((x) => ({ Ticker: x.ticker, Yahoo: x.yahoo, Role: x.role, Status: x.status, Obs: x.obs, Window: x.window, First: x.first, Last: x.last, Note: x.note })));
   const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });

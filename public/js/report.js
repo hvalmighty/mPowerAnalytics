@@ -293,6 +293,17 @@ export function renderAttribution(el, ctx) {
     { h: 'Interaction', f: (x) => fmt.pct(x.inter), v: (x) => x.inter, signed: true }, { h: 'Total', f: (x) => fmt.pct(x.total), v: (x) => x.total, signed: true },
   ], a.rows, { sector: 'Total', wp: 1, wb: 1, rp: a.portReturn, rb: a.benchReturn, alloc: a.totals.alloc, sel: a.totals.sel, inter: a.totals.inter, total: a.totals.alloc + a.totals.sel + a.totals.inter }),
   'Weights are period averages; returns are chain-linked daily. Cash is its own segment with zero benchmark weight and is benchmarked at 0%, so the cash cushion or drag appears as allocation; fees and interest appear as selection.') + '</div>';
+  if (ctx.attrCcy && !ctx.attrCcy.skipped) {
+    const c = ctx.attrCcy;
+    html += '<div class="grid1">' + panel('Currency attribution — portfolio vs benchmark', table([
+      { h: 'Currency', l: true, f: (x) => esc(x.segment) },
+      { h: 'Port. weight', f: (x) => fmt.pct(x.wp, 1) }, { h: 'Bench. weight', f: (x) => fmt.pct(x.wb, 1) }, { h: 'Active weight', f: (x) => fmt.pct(x.wp - x.wb, 1), v: (x) => x.wp - x.wb, signed: true },
+      { h: 'Port. return (local)', f: (x) => fmt.pct(x.rp) }, { h: 'Bench. return (local)', f: (x) => fmt.pct(x.rb) },
+      { h: 'Allocation', f: (x) => fmt.pct(x.alloc), v: (x) => x.alloc, signed: true }, { h: 'Selection', f: (x) => fmt.pct(x.sel), v: (x) => x.sel, signed: true },
+      { h: 'Interaction', f: (x) => fmt.pct(x.inter), v: (x) => x.inter, signed: true }, { h: 'Total', f: (x) => fmt.pct(x.total), v: (x) => x.total, signed: true },
+    ], c.rows, { segment: 'Total', wp: 1, wb: 1, rp: c.portReturn, rb: c.benchReturn, alloc: c.totals.alloc, sel: c.totals.sel, inter: c.totals.inter, total: c.totals.alloc + c.totals.sel + c.totals.inter }),
+    'Currency allocation = over/underweight in each currency versus the benchmark. Selection = return in local currency. FX translation is not modelled: the statement has no FX history, so holdings are translated at constant rates and the currency translation effect is zero. Benchmark segment "Not specified" is the sector-proxy lines, which have no currency in the factsheet.') + '</div>';
+  }
   html += '<div class="grid2">';
   html += panel('Monthly attribution', table([
     { h: 'Month', l: true, f: (x) => x.month }, { h: 'Portfolio', f: (x) => fmt.pct(x.port) }, { h: 'Benchmark', f: (x) => fmt.pct(x.bench) },

@@ -62,6 +62,61 @@ def read_statement(path):
             cash_usd = next(float(x) for x in v[1:] if isinstance(x, float))
     return pf_label, rows, cash_usd
 
+def write_benchmark_xlsx(cons, series, dates, held):
+    out = ROOT / "public/data/Benchmark_MSCI_Arabian_IMI.xlsx"
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Constituents"
+    hdr = ["Ticker", "Security Name", "Country", "Currency", "GICS-style Sector", "Index Weight (%)",
+           "Price Basis", "Local Price Anchor (23-Sep-2026)", "1-Year Price Return (USD, simulated)",
+           "Contribution to 1-Year Return (%)", "Held in ALBFUND"]
+    ws.append(hdr)
+    for c in ws[1]: c.fill = PatternFill("solid", fgColor="19395C"); c.font = Font(bold=True, color="FFFFFF"); c.alignment = Alignment(wrap_text=True)
+    total_contrib = 0
+    for c in cons:
+        p = series[c["ticker"]]
+        ret = p[-1] / p[0] - 1
+        contrib = c["weight"] * ret
+        total_contrib += contrib
+        ws.append([c["ticker"], c["name"], c["country"], c["currency"], c["sector"], round(c["weight"] * 100, 4), c["basis"],
+                   round(c["anchor"], 4) if not c["proxy"] else None, round(ret, 6), round(contrib * 100, 4), "Yes" if c["ticker"] in held else "No"])
+    ws.append(["TOTAL", "", "", "", "", round(sum(c["weight"] for c in cons) * 100, 4), "", "", round(total_contrib / 1, 6), round(total_contrib * 100, 4), ""])
+    ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+    for row in ws.iter_rows(min_row=2, min_col=6, max_col=6):
+        for x in row: x.number_format = "0.00"
+    for row in ws.iter_rows(min_row=2, min_col=9, max_col=9):
+        for x in row: x.number_format = "0.00%"
+    for row in ws.iter_rows(min_row=2, min_col=10, max_col=10):
+        for x in row: x.number_format = "0.00"
+    for i, w in enumerate([12, 40, 20, 16, 24, 14, 26, 18, 20, 20, 14], 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+    ws.freeze_panes = "A2"
+    cw = wb.create_sheet("Country_Weights")
+    cw.append(["Country (MSCI factsheet, 30-Oct-2026)", "Index Weight (%)"])
+    for k, v in [("Saudi Arabia", 53.18), ("United Arab Emirates", 21.23), ("Kuwait", 10.1), ("Qatar", 8.37), ("Morocco", 2.54), ("Other", 4.58)]:
+        cw.append([k, v])
+    cw.append(["Total", 100.0])
+    sw = wb.create_sheet("Sector_Weights")
+    sw.append(["Sector (MSCI factsheet, 30-Oct-2026)", "Factsheet Weight (%)", "Named Constituents (%)", "Sector Proxy Line (%)"])
+    fact = [("Financials", 52.29), ("Communication Services", 9.09), ("Energy", 9.08), ("Materials", 8.35), ("Real Estate", 6.5),
+            ("Industrials", 4.59), ("Utilities", 3.01), ("Consumer Discretionary", 2.76), ("Consumer Staples", 1.97), ("Health Care", 1.71), ("Information Technology", 0.63)]
+    for sec, w in fact:
+        named = sum(c["weight"] * 100 for c in cons if c["sector"] == sec and not c["proxy"])
+        proxy = sum(c["weight"] * 100 for c in cons if c["sector"] == sec and c["proxy"])
+        sw.append([sec, w, round(named, 2), round(proxy, 2)])
+    sw.append(["Total", 99.98, None, None])
+    for x in (cw, sw):
+        x.column_dimensions["A"].width = 40
+    nt = wb.create_sheet("Notes")
+    for line in [
+        "Source: MSCI Arabian Markets IMI Index (USD), factsheet as of 30-Oct-2026 (top-10 weights, country and sector weights).",
+        "The full 350-constituent list is not available in the public factsheet. Only the top 10 are named; the rest is one simulated sector-proxy line per sector.",
+        "Country and currency are shown as Not specified for sector proxy lines because no per-security data is available.",
+        "Prices for the named constituents not held in ALBFUND (Aramco, STC, e&, KFH, QNB) are approximate levels, not verified market prices.",
+        "1-year returns are from simulated daily series in USD, anchored to 23-Sep-2026 prices where a statement price exists.",
+    ]: nt.append([line])
+    nt.column_dimensions["A"].width = 140
+    wb.save(out)
+    print("wrote", out)
+
 def main(path):
     pf_label, rows, cash_usd = read_statement(path)
     fx = {"USD": 1.0}
@@ -86,12 +141,16 @@ def main(path):
     sector_w = {"Financials":52.29,"Communication Services":9.09,"Energy":9.08,"Materials":8.35,"Real Estate":6.5,
                 "Industrials":4.59,"Utilities":3.01,"Consumer Discretionary":2.76,"Consumer Staples":1.97,
                 "Health Care":1.71,"Information Technology":0.63}
-    cons = [dict(ticker=t, name=n, sector=s, weight=w, ccy=c, anchor=a, proxy=False) for t, n, s, w, c, a in top10]
+    COUNTRY = {"ALR":"Saudi Arabia","ARAMCO":"Saudi Arabia","SNB":"Saudi Arabia","STC":"Saudi Arabia","KFH":"Kuwait",
+               "NBK":"Kuwait","FAB":"United Arab Emirates","ETEC":"United Arab Emirates","EMR":"United Arab Emirates","QNBK":"Qatar"}
+    cons = [dict(ticker=t, name=n, sector=s, weight=w, ccy=c, anchor=a, proxy=False, country=COUNTRY[t], currency=c,
+                 basis=("Statement 23-Sep-2026" if t in px_of else "Approximate level (not verified)")) for t, n, s, w, c, a in top10]
     for s, sw in sector_w.items():
         rest = sw - sum(c["weight"] for c in cons if c["sector"] == s)
         if rest > 0.005:
             cons.append(dict(ticker="IDX-" + "".join(ch for ch in s.upper() if ch.isalpha())[:6], name=f"Index remainder: {s} (sector proxy)",
-                             sector=s, weight=round(rest, 2), ccy="USD", anchor=100.0, proxy=True))
+                             sector=s, weight=round(rest, 2), ccy="USD", anchor=100.0, proxy=True,
+                             country="Not specified", currency="Not specified", basis="Simulated sector proxy"))
     tot = sum(c["weight"] for c in cons)
     for c in cons: c["weight"] = round(c["weight"] / tot, 6)
 
@@ -133,9 +192,12 @@ def main(path):
         "base": "USD", "valuationDate": VAL_DATE.isoformat(), "fx": fx,
         "dates": dates, "series": {k: v for k, v in series.items()},
         "benchmark": {"id": "MSCIAM", "name": "MSCI Arabian Markets IMI Index (USD)", "asOf": "2026-10-30",
-                      "constituents": [{"ticker": c["ticker"], "name": c["name"], "sector": c["sector"], "weight": c["weight"], "yahoo": c["ticker"]} for c in cons]},
+                      "constituents": [{"ticker": c["ticker"], "name": c["name"], "sector": c["sector"], "country": c["country"], "currency": c["currency"], "weight": c["weight"], "yahoo": c["ticker"]} for c in cons]},
         "cashUsd": cash_usd,
     }, separators=(",", ":")))
+
+    # ---------- benchmark workbook (for review) ----------
+    write_benchmark_xlsx(cons, series, dates, {r["code"] for r in rows})
 
     # ---------- holdings workbook (mPower position-report layout) ----------
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Holdings"

@@ -13,7 +13,9 @@ function carinoLink(dailyEffects, rp, rb) {
   return { link: (eff) => eff.reduce((s, e, i) => s + e * kt[i], 0) / K, RP, RB };
 }
 
-export function computeAttribution(model, panel, book) {
+// field: 'sector' (default) or 'currency' — the segmentation the Brinson-Fachler effects are computed over.
+// Currency segments use the local transaction currency; FX translation is not modelled (no FX history).
+export function computeAttribution(model, panel, book, field = 'sector') {
   const { config, benchmark } = model;
   if (!benchmark.length) return { skipped: 'No Benchmark_Constituents sheet supplied.' };
   const { series } = panel;
@@ -30,22 +32,22 @@ export function computeAttribution(model, panel, book) {
     const p0 = s && priceArr(s)[i0];
     if (!p0) { warnings.push(`Benchmark constituent ${b.ticker} has no price on ${dates[0]}; excluded and weights renormalised.`); continue; }
     cons.push({ ...b, units: b.weight / p0, px: priceArr(s) }); wsum += b.weight;
-    names[key(b.sector)] ||= b.sector;
+    names[key(b[field] ?? 'Unclassified')] ||= b[field] ?? 'Unclassified';
   }
   cons.forEach((c) => (c.units /= wsum));
-  for (const t of book.tickers) names[key(book.meta[t].sector)] ||= book.meta[t].sector;
+  for (const t of book.tickers) names[key(book.meta[t][field] ?? 'Unclassified')] ||= book.meta[t][field] ?? 'Unclassified';
   names.cash ||= 'Cash';
   const segs = Object.keys(names);
 
   const bVal = (c, k) => { let p = c.px[i0 + k]; let j = k; while (p == null && j > 0) p = c.px[i0 + --j]; return c.units * (p || 0); };
   const BV = segs.map(() => new Array(T).fill(0));
-  for (const c of cons) { const si = segs.indexOf(key(c.sector)); for (let k = 0; k < T; k++) BV[si][k] += bVal(c, k); }
+  for (const c of cons) { const si = segs.indexOf(key(c[field] ?? 'Unclassified')); for (let k = 0; k < T; k++) BV[si][k] += bVal(c, k); }
   const BVtot = new Array(T).fill(0); for (let k = 0; k < T; k++) for (let s = 0; s < segs.length; s++) BVtot[k] += BV[s][k];
 
   // ---- portfolio segments
   const PMV = segs.map(() => new Array(T).fill(0)), PPNL = segs.map(() => new Array(T).fill(0));
   for (const t of book.tickers) {
-    const si = segs.indexOf(key(book.meta[t].sector));
+    const si = segs.indexOf(key(book.meta[t][field] ?? 'Unclassified'));
     for (let k = 0; k < T; k++) { PMV[si][k] += book.mv[t][k]; PPNL[si][k] += book.pnl[t][k]; }
   }
   const ci = segs.indexOf('cash');
@@ -89,7 +91,7 @@ export function computeAttribution(model, panel, book) {
 
   const { link, RP, RB } = carinoLink(null, rpT, rbT);
   const rows = segs.map((sk, s) => ({
-    sector: names[sk],
+    sector: names[sk], segment: names[sk],
     wp: wp[s] / (T - 1), wb: wb[s] / (T - 1),
     rp: PMV[s].some((x) => x > 0) ? gP[s] - 1 : null,
     rb: BV[s].some((x) => x > 0) ? gB[s] - 1 : null,
