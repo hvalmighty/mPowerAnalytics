@@ -19,10 +19,13 @@ const FIELDS = {
   mv: ['marketvalueintransactioncurrency'],
   portfolio: ['portfolio'],
   currency: ['transactioncurrency'],
+  sector: ['sector'],
+  portfolioCurrency: ['portfoliocurrency'],
+  bookCostPortfolio: ['bookcostinportfoliocurrency'],
 };
 // FX to the reporting currency (PHP); positions in other currencies are converted at these rates.
 export const FX_TO_PHP = { PHP: 1, USD: 62.5 };
-export const toPHP = (amount, ccy) => (amount == null ? null : amount * (FX_TO_PHP[(ccy || 'PHP').toUpperCase()] ?? 1));
+export const conv = (amount, ccy, fx = FX_TO_PHP) => (amount == null ? null : amount * (fx[(ccy || 'PHP').toUpperCase()] ?? 1));
 const num = (v) => (typeof v === 'number' ? v : v == null || v === '' ? null : Number(String(v).replace(/[,\s]/g, '')));
 
 // ---- detection + parsing --------------------------------------------------
@@ -65,6 +68,9 @@ export function parsePositionReport(wb) {
       marketValue: mv,
       portfolio: pf,
       currency: (col.currency >= 0 ? String(row[col.currency] ?? '').trim() : '') || 'PHP',
+      portfolioCurrency: (col.portfolioCurrency >= 0 ? String(row[col.portfolioCurrency] ?? '').trim() : '').toUpperCase(),
+      bookCostPortfolio: col.bookCostPortfolio >= 0 ? num(row[col.bookCostPortfolio]) : null,
+      sector: (col.sector >= 0 ? String(row[col.sector] ?? '').trim() : '') || '',
       assetClass: assetClass || 'Other',
     });
   }
@@ -98,14 +104,18 @@ export function simulateSeries(code, dates, endLevel = 100) {
 // builtin: { dates, series: {CODE: [prices…]} } from public/data/market_prices.json
 export function buildModelFromPortfolio(pf, builtin, benchmark = { id: 'PSEI', name: 'PSE Composite Index (PSEi)' }) {
   const all = builtin.dates;
-  // Price each position from the built-in universe when its code is there.
+  const base = (builtin.base || 'PHP').toUpperCase();          // reporting currency of the portfolio
+  const fx = builtin.fx || FX_TO_PHP;                           // units of base per 1 unit of each currency
+  const bmSpec = builtin.benchmark || null;                     // benchmark constituents supplied in the source file
+  const suffix = bmSpec ? '' : '.PS';
+  // Price each position from the built-in universe when its code is there (CASH is flat at 1).
   const lines = [];
   const seen = new Set();
   for (const p of pf.positions) {
     const code = p.security.trim().toUpperCase();
     const key = seen.has(code) ? `${code}#${seen.size}` : code; // keep duplicate codes as separate lines
     seen.add(code);
-    const real = builtin.series[code];
+    const real = builtin.series[code] || (code === 'CASH' ? all.map(() => 1) : null);
     let first = -1, last = -1;
     if (real) real.forEach((v, i) => { if (v > 0) { if (first < 0) first = i; last = i; } });
     lines.push({ p, code, key, real: first >= 0 ? real : null, first, last });
@@ -124,7 +134,8 @@ export function buildModelFromPortfolio(pf, builtin, benchmark = { id: 'PSEI', n
   const config = defaultConfig(priceRange, ctx);
   config.name = pf.label;
   config.benchmarkName = benchmark.name;
-  config.benchmarkSymbol = 'PSEI.PS';
+  config.benchmarkSymbol = bmSpec ? bmSpec.id : 'PSEI.PS';
+  config.baseCurrency = base;
   config.autoDividends = false;
 
   const priceHistory = [], holdings = [];
@@ -139,23 +150,39 @@ export function buildModelFromPortfolio(pf, builtin, benchmark = { id: 'PSEI', n
       end = 100;
     }
     const p = l.p;
-    const mvPHP = toPHP(p.marketValue, p.currency);
-    p.marketValuePHP = mvPHP; p.bookCostPHP = toPHP(p.bookCost, p.currency);
+    const mvB = conv(p.marketValue, p.currency, fx);
+    p.marketValueBase = mvB;
+    // Book cost at the historical rates the PMS used, when the report gives it in portfolio currency.
+    p.bookCostBase = p.bookCostPortfolio != null && (!p.portfolioCurrency || p.portfolioCurrency === base) ? p.bookCostPortfolio : conv(p.bookCost, p.currency, fx);
     holdings.push({
-      date: config.valuationDate, ticker: l.key, yahoo: `${l.key}.PS`, isin: '', name: p.name, sector: p.assetClass,
-      subsector: '', qty: mvPHP / end, avgCost: null, price: null, mv: mvPHP,
+      date: config.valuationDate, ticker: l.key, yahoo: l.code === 'CASH' ? 'CASH' : `${l.key}${suffix}`, isin: '', name: p.name,
+      sector: p.sector || p.assetClass, subsector: '', qty: mvB / end, avgCost: null, price: null, mv: mvB,
     });
   }
-  const bm = simulateSeries('BENCH:' + benchmark.id, dates, 6000);
-  bm.closes.forEach((v, i) => priceHistory.push({ date: dates[i], ticker: 'PSEI', close: v, adj: null, sim: true }));
+
+  // Benchmark: the constituents supplied in the source file, or the simulated PSEi.
+  let benchmarkList = [];
+  if (bmSpec) {
+    const pushed = new Set(priceHistory.map((r) => r.ticker));
+    for (const c of bmSpec.constituents) {
+      benchmarkList.push({ ticker: c.ticker, yahoo: c.yahoo, name: c.name, sector: c.sector, weight: c.weight });
+      const arr = builtin.series[c.ticker];
+      if (!pushed.has(c.ticker) && arr) { pushed.add(c.ticker); for (let i = s0; i <= s1; i++) priceHistory.push({ date: all[i], ticker: c.ticker, close: arr[i], adj: null }); }
+    }
+    const idx = builtin.series[bmSpec.id];
+    if (idx) for (let i = s0; i <= s1; i++) priceHistory.push({ date: all[i], ticker: bmSpec.id, close: idx[i], adj: null });
+  } else {
+    const bm = simulateSeries('BENCH:' + benchmark.id, dates, 6000);
+    bm.closes.forEach((v, i) => priceHistory.push({ date: dates[i], ticker: 'PSEI', close: v, adj: null, sim: true }));
+  }
 
   ctx.info.push(`Valued on ${priceRange.max} at the reported market values; holdings treated as unchanged over ${priceRange.min} → ${priceRange.max}.`);
-  const fx = [...new Set(pf.positions.map((p) => p.currency.toUpperCase()).filter((c) => c !== 'PHP'))];
-  if (fx.length) ctx.info.push(`Values in PHP; ${fx.map((c) => `${c} converted at ${FX_TO_PHP[c] ?? 1}`).join(', ')}.`);
+  const fxUsed = [...new Set(pf.positions.map((p) => p.currency.toUpperCase()).filter((c) => c !== base))];
+  if (fxUsed.length) ctx.info.push(`Values in ${base}; ${fxUsed.map((c) => `${c} converted at ${fx[c] ?? 1} ${base} per unit`).join(', ')}.`);
 
   return {
-    config, holdings, transactions: [], cashFlows: [], benchmark: [], scenarios: [], overrides: [],
-    priceHistory, priceRange, priceSource: 'file', usedBuiltin: true, benchmarkSimulated: true, fxRates: FX_TO_PHP,
+    config, holdings, transactions: [], cashFlows: [], benchmark: benchmarkList, scenarios: [], overrides: [],
+    priceHistory, priceRange, priceSource: 'file', usedBuiltin: true, benchmarkSimulated: !bmSpec, fxRates: fx, baseCurrency: base,
     positions: pf.positions, errors: ctx.errors, warnings: ctx.warnings, info: ctx.info,
   };
 }

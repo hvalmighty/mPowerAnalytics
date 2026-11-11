@@ -6,8 +6,12 @@ export function destroyCharts() { while (charts.length) charts.pop().destroy(); 
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// Reporting currency of the portfolio being shown (PHP for PSE portfolios, USD for the Arabian one).
+let BASE = 'PHP';
+export function setBase(code) { BASE = (code || 'PHP').toUpperCase(); }
+const sym = () => (BASE === 'PHP' ? '₱' : BASE === 'USD' ? '$' : BASE + ' ');
 export const fmt = {
-  php: (x, dp = 0) => (x == null || !isFinite(x) ? '–' : (x < 0 ? '−₱' : '₱') + Math.abs(x).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })),
+  php: (x, dp = 0) => (x == null || !isFinite(x) ? '–' : (x < 0 ? '−' : '') + sym() + Math.abs(x).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })),
   pct: (x, dp = 2) => (x == null || !isFinite(x) ? '–' : (x < 0 ? '−' : '') + Math.abs(x * 100).toFixed(dp) + '%'),
   bp: (x) => (x == null || !isFinite(x) ? '–' : (x < 0 ? '−' : '') + Math.abs(x * 1e4).toFixed(0) + ' bp'),
   num: (x, dp = 2) => (x == null || !isFinite(x) ? '–' : (x < 0 ? '−' : '') + Math.abs(x).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })),
@@ -63,7 +67,7 @@ export function renderSummary(el, ctx) {
   }
   html += '</div>';
   html += '<div class="grid2">';
-  if (perf) html += panel('Growth of ₱100', legend([[css('--series-1'), 'Portfolio'], ...(perf.hasBench ? [[css('--series-2'), 'Benchmark']] : [])]) + chartBox('cSumGrowth'));
+  if (perf) html += panel('Growth of ' + sym() + '100', legend([[css('--series-1'), 'Portfolio'], ...(perf.hasBench ? [[css('--series-2'), 'Benchmark']] : [])]) + chartBox('cSumGrowth'));
   if (risk && !risk.error) html += panel(`Where the risk sits — component VaR by sector (${(risk.aMax * 100).toFixed(0)}%, 1-day)`, chartBox('cSumSector'), 'Parametric Euler decomposition; components add up to total VaR.');
   html += '</div>';
   if (attr && !attr.skipped) {
@@ -141,7 +145,7 @@ export function renderRisk(el, ctx) {
     { h: 'Component VaR', f: (x) => fmt.php(x.component) }, { h: '% of VaR', f: (x) => fmt.pct(x.componentPct, 1) },
     { h: 'Incremental VaR (hist.)', f: (x) => fmt.php(x.incremental) }, { h: 'ES contribution (hist.)', f: (x) => fmt.php(x.histEsContrib) },
   ], r.contrib, { ticker: 'Total', name: '', sector: '', mv: r.netMV, weight: r.netMV / r.totalNAV, annVol: null, standalone: r.diversification.sumStandalone, marginal: null, component: r.diversification.portfolioVar, componentPct: 1, incremental: null, histEsContrib: r.contrib.reduce((s, x) => s + x.histEsContrib, 0) }),
-  'Marginal VaR = change in VaR per ₱1 added. Component VaR = marginal × position (sums to parametric VaR). Incremental VaR = historical VaR with the position minus VaR without it.') + '</div>';
+  'Marginal VaR = change in VaR per 1 unit added. Component VaR = marginal × position (sums to parametric VaR). Incremental VaR = historical VaR with the position minus VaR without it.') + '</div>';
 
   html += '<div class="grid1">' + panel('Correlation matrix (daily log returns)', heatmap(r.corr), `${r.covMethod} correlations over the lookback window.`) + '</div>';
   html += '<div class="grid1">' + panel('Methodology', `<ul class="notes">
@@ -149,7 +153,7 @@ export function renderRisk(el, ctx) {
     <li><b>Parametric</b>: VaR = z·√(MVᵀΣMV); ES = σ·φ(z)/(1 − α). Mean return assumed zero.</li>
     <li><b>Monte Carlo</b>: Cholesky factor of Σ applied to independent normals; positions fully revalued.</li>
     <li>Missing returns (recent listings, suspensions) are filled with the benchmark index return; affected positions are flagged in Data Quality.</li>
-    <li>Cash is treated as riskless. PHP base currency; no FX risk is modelled.</li></ul>`) + '</div>';
+    <li>Cash is treated as riskless. ${BASE} base currency; FX movements are not modelled.</li></ul>`) + '</div>';
   el.innerHTML = html;
 
   // histogram
@@ -200,7 +204,7 @@ export function renderPerformance(el, ctx) {
   html += '</div>';
 
   html += '<div class="grid2">';
-  html += panel('Growth of ₱100', legend([[css('--series-1'), 'Portfolio'], ...(p.hasBench ? [[css('--series-2'), 'Benchmark']] : [])]) + chartBox('cGrowth'));
+  html += panel('Growth of ' + sym() + '100', legend([[css('--series-1'), 'Portfolio'], ...(p.hasBench ? [[css('--series-2'), 'Benchmark']] : [])]) + chartBox('cGrowth'));
   html += panel('Drawdown from peak', legend([[css('--series-1'), 'Portfolio'], [css('--series-2'), 'Benchmark']]) + chartBox('cDD'));
   html += '</div><div class="grid2">';
   html += panel('Returns by period', table([
@@ -359,9 +363,9 @@ export function renderDQ(el, ctx) {
 export function renderHoldings(el, ctx) {
   const pos = ctx.model.positions;
   if (!pos) { el.innerHTML = ''; return; }
-  const tot = pos.reduce((o, p) => ({ book: o.book + (p.bookCostPHP || 0), mv: o.mv + (p.marketValuePHP || 0) }), { book: 0, mv: 0 });
-  const fx = [...new Set(pos.map((p) => p.currency).filter((c) => c !== 'PHP'))];
-  const amt = (v, ccy) => (v == null ? '–' : (ccy && ccy !== 'PHP' ? `<span class="ccy">${esc(ccy)}</span> ` : '') + fmt.num(v, 2));
+  const tot = pos.reduce((o, p) => ({ book: o.book + (p.bookCostBase || 0), mv: o.mv + (p.marketValueBase || 0) }), { book: 0, mv: 0 });
+  const fx = [...new Set(pos.map((p) => p.currency).filter((c) => c !== BASE))];
+  const amt = (v, ccy) => (v == null ? '–' : (ccy && ccy !== BASE ? `<span class="ccy">${esc(ccy)}</span> ` : '') + fmt.num(v, 2));
   const groups = [...new Set(pos.map((p) => p.assetClass))];
   let body = '';
   for (const g of groups) {
@@ -370,8 +374,8 @@ export function renderHoldings(el, ctx) {
       body += `<tr><td class="l"><b>${esc(r.security)}</b></td><td class="l wrap">${esc(r.name)}</td><td>${amt(r.bookCost, r.currency)}</td><td>${amt(r.marketValue, r.currency)}</td><td class="l">${esc(r.portfolio)}</td></tr>`;
   }
   const gain = tot.mv - tot.book;
-  el.innerHTML = '<div class="kpis">' + kpi('Positions', String(pos.length)) + kpi('Book cost', fmt.php(tot.book, 2), 'PHP') + kpi('Market value', fmt.php(tot.mv, 2), 'PHP') +
+  el.innerHTML = '<div class="kpis">' + kpi('Positions', String(pos.length)) + kpi('Book cost', fmt.php(tot.book, 2), BASE) + kpi('Market value', fmt.php(tot.mv, 2), BASE) +
     kpi('Unrealised gain', fmt.php(gain, 2), tot.book ? fmt.pct(tot.mv / tot.book - 1) : '') + '</div>' +
-    '<div class="grid1">' + panel('Holdings', `<div class="tbl-wrap"><table><thead><tr><th class="l">Security</th><th class="l">Security Name</th><th>Book Cost in Transaction Currency</th><th>Market Value in Transaction Currency</th><th class="l">Portfolio</th></tr></thead><tbody>${body}<tr class="total"><td class="l">Total (PHP)</td><td></td><td>${fmt.num(tot.book, 2)}</td><td>${fmt.num(tot.mv, 2)}</td><td></td></tr></tbody></table></div>`,
-      'Grouped by asset class as in the mPower report.' + (fx.length ? ` Totals in PHP; ${fx.map((c) => `${c} converted at ${ctx.model.fxRates?.[c] ?? ''}`).join(', ')}.` : '')) + '</div>';
+    '<div class="grid1">' + panel('Holdings', `<div class="tbl-wrap"><table><thead><tr><th class="l">Security</th><th class="l">Security Name</th><th>Book Cost in Transaction Currency</th><th>Market Value in Transaction Currency</th><th class="l">Portfolio</th></tr></thead><tbody>${body}<tr class="total"><td class="l">Total (${BASE})</td><td></td><td>${fmt.num(tot.book, 2)}</td><td>${fmt.num(tot.mv, 2)}</td><td></td></tr></tbody></table></div>`,
+      'Grouped by asset class as in the mPower report.' + (fx.length ? ` Totals in ${BASE}; ${fx.map((c) => `${c} converted at ${ctx.model.fxRates?.[c] ?? ''}`).join(', ')}.` : '')) + '</div>';
 }
