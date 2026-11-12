@@ -154,6 +154,8 @@ def main(path):
                       "source": "MSCI Arabian Markets Index (USD) factsheet, top-10 constituents (supplied)", "priceHistory": True,
                       "constituents": [{"ticker": b["ticker"], "name": b["name"], "sector": b["sector"], "country": b["country"],
                                         "currency": b["currency"], "weight": round(b["weight"], 8), "factsheetWeight": b["fact_w"],
+                                        "anchorLocal": b["local_px"] if b["local_px"] is not None else APPROX_LEVEL[b["ticker"]],
+                                        "priceIsSimulated": b["local_px"] is None,
                                         "floatCapUsdBn": b["cap"], "priceStatus": b["status"], "yahoo": b["key"]} for b in bm]},
     }, separators=(",", ":")))
     write_benchmark_xlsx(bm, fx, dates, bm_series, series["MSCIAM"])

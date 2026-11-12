@@ -174,7 +174,8 @@ export function buildModelFromPortfolio(pf, builtin, benchmark = { id: 'PSEI', n
   } else if (bmSpec) {
     const pushed = new Set(priceHistory.map((r) => r.ticker));
     for (const c of bmSpec.constituents) {
-      benchmarkList.push({ ticker: c.ticker, yahoo: c.yahoo, name: c.name, sector: c.sector, country: c.country, currency: c.currency, weight: c.weight });
+      benchmarkList.push({ ticker: c.ticker, yahoo: c.yahoo, name: c.name, sector: c.sector, country: c.country, currency: c.currency, weight: c.weight,
+        anchorLocal: c.anchorLocal, priceIsSimulated: !!c.priceIsSimulated });
       const arr = builtin.series[c.yahoo];
       if (!pushed.has(c.yahoo) && arr) { pushed.add(c.yahoo); for (let i = s0; i <= s1; i++) priceHistory.push({ date: all[i], ticker: c.yahoo, close: arr[i], adj: null }); }
     }

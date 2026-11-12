@@ -19,8 +19,13 @@ export function buildRebalance(model, overrides = {}) {
   const rows = tickers.map((t) => {
     const h = hold.get(t), b = bmBy.get(t);
     const mv = h ? h.mv : 0;
-    const usdPx = h && h.qty ? mv / h.qty : null;               // USD price at valuation (statement price)
     const ccy = h ? h.currency : b.currency;
+    // USD price at valuation: the statement price for held names; for names without a price, the
+    // simulated approximate level (flagged) so the order can be sized.
+    const heldPx = h && h.qty ? mv / h.qty : null;
+    const simPx = heldPx == null && b && b.anchorLocal ? b.anchorLocal * (fx[ccy] ?? 1) : null;
+    const usdPx = heldPx ?? simPx;
+    const isSim = heldPx == null && simPx != null;
     const localPx = usdPx != null ? usdPx / (fx[ccy] ?? 1) : null;
     const bw = b ? b.weight : 0;
     const sysBuy = Math.max(0, bw * nav - mv);                  // buy-only: lift to benchmark weight, never sell
@@ -34,11 +39,11 @@ export function buildRebalance(model, overrides = {}) {
     }
     const action = amount >= 1 ? 'Buy' : 'Hold';
     const note = !b ? 'Not in benchmark: kept, not sold.'
-      : usdPx == null ? (amount >= 1 ? 'No price data: amount only. Enter a price to size units.' : 'No price data: enter an amount to size this order.')
+      : isSim ? 'Simulated price (approximate level, not market data): size and confirm before trading.'
       : (mv > bw * nav && action === 'Hold' ? 'Above benchmark weight: kept, not sold.' : '');
     return { ticker: t, name: h ? h.name : b.name, currency: ccy, sector: h ? h.sector : b.sector,
       country: b ? b.country : 'Not in benchmark', wb: bw, mv, wp: nav ? mv / nav : 0,
-      priced: usdPx != null, localPx, units, amount, action, note };
+      priced: usdPx != null, isSim, localPx, units, amount, action, note };
   });
   const cashRequired = rows.reduce((s, r) => s + (r.amount > 0 ? r.amount : 0), 0);
   const newNav = nav + cashRequired;

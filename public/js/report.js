@@ -414,8 +414,8 @@ export function renderRebalance(el, ctx) {
     { h: 'Ccy', l: true, f: (x) => esc(x.currency) },
     { h: 'Current wt', f: (x) => pct(x.wp) }, { h: 'Bench. wt', f: (x) => pct(x.wb) },
     { h: 'Proposed wt', f: (x) => pct(x.newW) }, { h: 'Active after', f: (x) => pct(x.active), v: (x) => x.active, signed: true },
-    { h: 'Order amount (USD)', f: (x) => (x.priced ? fmt.php(x.amount, 0) : `<input type="number" min="0" step="1" value="${Math.round(x.amount)}" data-ticker="${esc(x.ticker)}" style="width:130px">`) },
-    { h: 'Price (local)', f: (x) => (x.localPx != null ? x.localPx.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : '–') },
+    { h: 'Order amount (USD)', f: (x) => fmt.php(x.amount, 0) },
+    { h: 'Price (local)', f: (x) => (x.localPx != null ? x.localPx.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) + (x.isSim ? ' (sim.)' : '') : '–') },
     { h: 'Units to buy', f: (x) => (x.priced ? `<input type="number" min="0" step="1" value="${x.units}" data-ticker="${esc(x.ticker)}" style="width:110px">` : 'n/a') },
     { h: 'Note', l: true, wrap: true, f: (x) => esc(x.note) },
   ];
@@ -443,7 +443,7 @@ function openOrdersPopup(R) {
     { h: 'Ticker', l: true, f: (x) => esc(x.ticker) }, { h: 'Ccy', l: true, f: (x) => esc(x.currency) },
     { h: 'Order amount', f: (x) => fmt.php(x.amount, 0), v: (x) => x.amount, signed: true },
     { h: 'Price (local)', f: (x) => (x.localPx != null ? x.localPx.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : '–') },
-    { h: 'Units', f: (x) => (x.units == null ? 'Enter price' : x.units.toLocaleString('en-US')), v: (x) => x.units, signed: true },
+    { h: 'Units', f: (x) => (x.units == null ? 'n/a' : x.units.toLocaleString('en-US') + (x.isSim ? ' (sim. price)' : '')), v: (x) => x.units, signed: true },
     { h: 'Note', l: true, wrap: true, f: (x) => esc(x.note) },
   ];
   const total = { name: `${orders.length} buy orders`, ticker: '', currency: '', action: '', amount: R.totals.cashRequired, localPx: null, units: null,
