@@ -1,7 +1,7 @@
-// Rebalancing: buy-only alignment to the benchmark. Nothing is sold to raise cash.
-// Each benchmark name is lifted to its benchmark weight of the current NAV; names above their weight,
-// and holdings outside the benchmark, are kept. The cash required is the total of the buys.
-// overrides: { TICKER: units } for priced names, { TICKER: USD amount } for names without a price.
+// Rebalancing to the benchmark. Each benchmark name's target is its benchmark weight x current NAV:
+// names above target are sold, names below target are bought, and holdings outside the benchmark are sold in full.
+// Buys and sells are shown separately and the net cash is reported, not assumed.
+// overrides: { TICKER: signed units } for priced names (+ buy, - sell); { TICKER: signed USD } for names without a price.
 export function buildRebalance(model, overrides = {}) {
   const bm = model.benchmark || [];
   if (!bm.length) return null;
@@ -19,6 +19,7 @@ export function buildRebalance(model, overrides = {}) {
   const rows = tickers.map((t) => {
     const h = hold.get(t), b = bmBy.get(t);
     const mv = h ? h.mv : 0;
+    const qty = h ? h.qty : 0;
     const ccy = h ? h.currency : b.currency;
     // USD price at valuation: the statement price for held names; for names without a price, the
     // simulated approximate level (flagged) so the order can be sized.
@@ -28,25 +29,30 @@ export function buildRebalance(model, overrides = {}) {
     const isSim = heldPx == null && simPx != null;
     const localPx = usdPx != null ? usdPx / (fx[ccy] ?? 1) : null;
     const bw = b ? b.weight : 0;
-    const sysBuy = Math.max(0, bw * nav - mv);                  // buy-only: lift to benchmark weight, never sell
+    const sysAmt = bw * nav - mv;                               // +buy / -sell toward the benchmark weight
     let units = null, amount;
     if (usdPx != null) {
-      units = Math.floor(sysBuy / usdPx);
-      if (t in overrides) units = Math.max(0, Math.round(Number(overrides[t]) || 0));
+      // A sell can never exceed the quantity held.
+      const sysUnits = sysAmt >= 0
+        ? Math.floor(sysAmt / usdPx + 1e-9)
+        : -Math.min(qty, Math.floor(-sysAmt / usdPx + 1e-9));
+      units = t in overrides ? Math.round(Number(overrides[t]) || 0) : sysUnits;
+      if (units < 0) units = -Math.min(-units, qty);
       amount = units * usdPx;
     } else {
-      amount = t in overrides ? Math.max(0, Number(overrides[t]) || 0) : sysBuy;
+      amount = t in overrides ? Number(overrides[t]) || 0 : sysAmt;
+      amount = Math.max(-mv, amount);
     }
-    const action = amount >= 1 ? 'Buy' : 'Hold';
-    const note = !b ? 'Not in benchmark: kept, not sold.'
-      : isSim ? 'Simulated price (approximate level, not market data): size and confirm before trading.'
-      : (mv > bw * nav && action === 'Hold' ? 'Above benchmark weight: kept, not sold.' : '');
+    const action = amount >= 1 ? 'Buy' : amount <= -1 ? 'Sell' : 'Hold';
+    if (action === 'Hold') amount = 0;
     return { ticker: t, name: h ? h.name : b.name, currency: ccy, sector: h ? h.sector : b.sector,
       country: b ? b.country : 'Not in benchmark', wb: bw, mv, wp: nav ? mv / nav : 0,
-      priced: usdPx != null, isSim, localPx, units, amount, action, note };
+      priced: usdPx != null, isSim, localPx, units, amount, action };
   });
-  const cashRequired = rows.reduce((s, r) => s + (r.amount > 0 ? r.amount : 0), 0);
-  const newNav = nav + cashRequired;
+  const buys = rows.reduce((s, r) => s + (r.amount > 0 ? r.amount : 0), 0);
+  const sells = rows.reduce((s, r) => s + (r.amount < 0 ? -r.amount : 0), 0);
+  const net = buys - sells;                                    // cash required (negative = cash released)
+  const newNav = nav + net;
   for (const r of rows) {
     r.newMv = r.mv + r.amount;
     r.newW = newNav ? r.newMv / newNav : 0;
@@ -58,8 +64,8 @@ export function buildRebalance(model, overrides = {}) {
   rows.sort((a, b) => (b.amount - a.amount) || (b.mv - a.mv) || a.ticker.localeCompare(b.ticker));
   return {
     base, nav, newNav, rows,
-    totals: { cashRequired, buys: cashRequired, sells: 0, net: cashRequired, turnover: nav ? cashRequired / nav : 0,
-      orders: rows.filter((r) => r.action === 'Buy').length, mismatchBefore, mismatchAfter },
+    totals: { cashRequired: net, buys, sells, net, turnover: nav ? (buys + sells) / 2 / nav : 0,
+      orders: rows.filter((r) => r.action !== 'Hold').length, mismatchBefore, mismatchAfter },
     asOf: model.config.valuationDate || model.priceRange?.max,
     overrides: { ...overrides },
   };
