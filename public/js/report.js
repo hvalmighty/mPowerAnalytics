@@ -422,7 +422,7 @@ export function renderRebalance(el, ctx) {
   const total = { name: 'Total', ticker: '', currency: '', country: '', wp: R.rows.reduce((s, r) => s + r.wp, 0), wb: R.rows.reduce((s, r) => s + r.wb, 0), active: 0, mv: R.nav, target: R.rows.reduce((s, r) => s + r.target, 0), action: '', amount: R.totals.net, localPx: null, units: null, note: 'Net of buys and sells is zero (no cash is held).' };
   const body = table(cols, R.rows.filter((r) => r.action !== 'Hold' || r.note), total);
   el.innerHTML = kpis + panel('Portfolio vs benchmark — rebalancing orders',
-    `<div style="margin:0 0 10px"><button id="btnGenOrders" class="icon-btn text" type="button">Generate orders</button></div>` + body,
+    `<div style="margin:0 0 10px"><button id="btnGenOrders" type="button" style="padding:8px 16px;border:2px solid #1565c0;background:#fff;color:#1565c0;border-radius:6px;cursor:pointer;font-weight:700;font-size:14px">Generate orders</button></div>` + body,
     `Target value = benchmark weight × current NAV, as at ${esc(R.asOf)}. Units are whole units at the statement price. Names with no price data show an amount only. Trading costs, lot sizes and FX moves are not modelled.`);
   el.querySelector('#btnGenOrders').addEventListener('click', () => openOrdersPopup(R));
 }
@@ -447,6 +447,9 @@ function openOrdersPopup(R) {
       <h3 style="margin:0;color:#19395c">Rebalancing orders</h3>
       <button type="button" id="btnCloseOrders" aria-label="Close" style="border:0;background:none;font-size:22px;cursor:pointer;color:#000">×</button>
     </div>
+    <div style="display:flex;justify-content:flex-end;margin:0 0 10px">
+      <button type="button" id="btnPushOrders" title="Downloads the orders as an Excel file for loading into your PMS or broker. No direct connection exists." style="padding:8px 16px;border:0;background:#1565c0;color:#fff;border-radius:6px;cursor:pointer;font-weight:700;font-size:14px">Push orders (download Excel)</button>
+    </div>
     <p style="margin:0 0 12px;font-size:13px">Orders to align the portfolio to the benchmark as at ${esc(R.asOf)}. Units are whole units at the statement price. Names with no price data need a price before they can be sized.</p>
     ${table(cols, orders, total)}
   </div>`;
@@ -454,6 +457,14 @@ function openOrdersPopup(R) {
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   overlay.querySelector('#btnCloseOrders').addEventListener('click', close);
+  overlay.querySelector('#btnPushOrders').addEventListener('click', () => {
+    const rows = orders.map((x) => ({ Action: x.action, Security: x.name, Ticker: x.ticker, Currency: x.currency, Order_Amount: Math.round(x.amount * 100) / 100,
+      Price_Local: x.localPx != null ? Math.round(x.localPx * 10000) / 10000 : '', Units: x.units ?? '', Note: x.note }));
+    rows.push({ Action: 'Net', Order_Amount: Math.round(R.totals.net * 100) / 100 });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Orders');
+    XLSX.writeFile(wb, `Rebalance_Orders_${String(R.asOf).slice(0, 10)}.xlsx`);
+  });
   document.addEventListener('keydown', onKey);
   document.body.appendChild(overlay);
 }
