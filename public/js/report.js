@@ -280,7 +280,7 @@ export function renderAttribution(el, ctx) {
     { h: 'Factsheet wt', f: (x) => x.factsheetWeight.toFixed(2) + '%' }, { h: 'Benchmark wt', f: (x) => fmt.pct(x.weight, 2) },
     { h: 'Price data', l: true, f: (x) => esc(x.priceStatus) },
   ], def, { name: 'Total', ticker: '', country: '', currency: '', sector: '', priceStatus: '', factsheetWeight: def.reduce((s, x) => s + x.factsheetWeight, 0), weight: 1, floatCapUsdBn: def.reduce((s, x) => s + x.floatCapUsdBn, 0) }),
-  'Weights are the published index weights divided by their total (49.98%). No benchmark prices are simulated.') + '</div>' : '';
+  'Weights are the published index weights divided by their total (49.98%). Benchmark prices are simulated with a stated 5% annual drift assumption; no market history was available.') + '</div>' : '';
   if (!a || a.skipped) { el.innerHTML = `<div class="msg warn">${esc(a ? a.skipped : 'Attribution not computed.')}</div>` + defHtml; return; }
   let html = '<div class="kpis">';
   html += kpi('Portfolio return', fmt.pct(a.portReturn));

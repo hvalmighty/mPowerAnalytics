@@ -169,8 +169,8 @@ export function buildModelFromPortfolio(pf, builtin, benchmark = { id: 'PSEI', n
     const pushed = new Set(priceHistory.map((r) => r.ticker));
     for (const c of bmSpec.constituents) {
       benchmarkList.push({ ticker: c.ticker, yahoo: c.yahoo, name: c.name, sector: c.sector, country: c.country, currency: c.currency, weight: c.weight });
-      const arr = builtin.series[c.ticker];
-      if (!pushed.has(c.ticker) && arr) { pushed.add(c.ticker); for (let i = s0; i <= s1; i++) priceHistory.push({ date: all[i], ticker: c.ticker, close: arr[i], adj: null }); }
+      const arr = builtin.series[c.yahoo];
+      if (!pushed.has(c.yahoo) && arr) { pushed.add(c.yahoo); for (let i = s0; i <= s1; i++) priceHistory.push({ date: all[i], ticker: c.yahoo, close: arr[i], adj: null }); }
     }
     const idx = builtin.series[bmSpec.id];
     if (idx) for (let i = s0; i <= s1; i++) priceHistory.push({ date: all[i], ticker: bmSpec.id, close: idx[i], adj: null });

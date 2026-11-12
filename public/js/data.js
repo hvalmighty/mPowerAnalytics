@@ -9,7 +9,7 @@ export async function fetchPrices(model, onProgress) {
   const symbols = new Set([config.benchmarkSymbol]);
   const yahooOf = {};
   for (const h of holdings) if (h.ticker !== 'CASH' && h.yahoo) { symbols.add(h.yahoo); yahooOf[h.ticker] = h.yahoo; }
-  for (const b of benchmark) { symbols.add(b.yahoo); yahooOf[b.ticker] = yahooOf[b.ticker] || b.yahoo; }
+  for (const b of benchmark) { symbols.add(b.yahoo); yahooOf[b.ticker] = yahooOf[b.ticker] || b.yahoo; yahooOf[b.yahoo] = b.yahoo; }
   for (const t of transactions) if (t.ticker !== 'CASH' && !yahooOf[t.ticker]) { yahooOf[t.ticker] = `${t.ticker}.PS`; symbols.add(yahooOf[t.ticker]); }
 
   // enough history for lookback + backtest (≈245 PSE trading days a year)

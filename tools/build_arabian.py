@@ -72,6 +72,9 @@ def read_statement(path):
                          mv_tx=float(v[14]), mv_usd=float(v[15]), book_usd=float(v[12])))
     return pf_label, rows
 
+BENCH_DRIFT = 0.05   # assumed annual drift of the benchmark constituents (stated assumption, not a market figure)
+APPROX_LEVEL = {"ARAMCO": 27.0, "KFH": 0.75, "STC": 40.0, "ETEC": 14.0, "QNBK": 17.5}  # local, unverified
+
 def main(path):
     pf_label, rows = read_statement(path)
     fx = {"USD": 1.0}
@@ -94,11 +97,12 @@ def main(path):
         if d.weekday() < 5: dates.append(d.isoformat())
         d += datetime.timedelta(days=1)
     n = len(dates)
-    def simulate(key, anchor_local, sector, fx_rate):
+    def simulate(key, anchor_local, sector, fx_rate, drift=0.0):
         rng = random.Random(zlib.crc32(key.encode()))
         s = SIGMA.get(sector, 0.24) / math.sqrt(252)
+        mu = math.log(1 + drift) / 252
         lvl = [1.0]
-        for _ in range(n - 1): lvl.append(lvl[-1] * math.exp(rng.gauss(0, s)))
+        for _ in range(n - 1): lvl.append(lvl[-1] * math.exp(mu + rng.gauss(0, s)))
         scale = anchor_local / lvl[-1]
         return [round(x * scale * fx_rate, 6) for x in lvl]   # USD
     series = {}
@@ -108,18 +112,35 @@ def main(path):
         series[r["code"]] = simulate(r["code"], r["price"], sec, fx[r["ccy"]])
         holding_rows.append(r | {"sector": sec})
 
+
+    # benchmark constituents: simulated with the stated drift, anchored to the statement price or the approximate level
+    bm_series = {}
+    for b in bm:
+        key = "BM:" + b["ticker"]
+        anchor = b["local_px"] if b["local_px"] is not None else APPROX_LEVEL[b["ticker"]]
+        bm_series[key] = simulate(key, anchor, b["sector"], fx[b["currency"]], drift=BENCH_DRIFT)
+        b["key"] = key
+        b["status"] = ("Simulated: statement price 23-Sep-2026 anchor, %d%% p.a. drift assumption" % round(BENCH_DRIFT * 100)
+                       if b["held"] else "Simulated: approximate level (unverified) anchor, %d%% p.a. drift assumption" % round(BENCH_DRIFT * 100))
+    index = [0.0] * n
+    for b in bm:
+        p = bm_series[b["key"]]
+        for i in range(n): index[i] += b["weight"] * p[i] / p[0]
+    series.update(bm_series)
+    series["MSCIAM"] = [round(100 * x, 6) for x in index]
+
     OUT_JSON.write_text(json.dumps({
         "source": "Holding statement " + path.split("/")[-1] + "; holdings history simulated, anchored to 23-Sep-2026 prices",
         "base": "USD", "valuationDate": VAL_DATE.isoformat(), "fx": fx,
         "dates": dates, "series": series,
+        "benchmarkAssumptions": {"annualDrift": BENCH_DRIFT, "pricesSimulated": True, "note": "Benchmark prices simulated; no market history available"},
         "benchmark": {"id": "MSCIAM", "name": "MSCI Arabian Markets IMI Index (USD), top-10 constituents with price data",
-                      "source": "MSCI Arabian Markets Index (USD) factsheet, top-10 constituents (supplied)", "priceHistory": False,
+                      "source": "MSCI Arabian Markets Index (USD) factsheet, top-10 constituents (supplied)", "priceHistory": True,
                       "constituents": [{"ticker": b["ticker"], "name": b["name"], "sector": b["sector"], "country": b["country"],
                                         "currency": b["currency"], "weight": round(b["weight"], 8), "factsheetWeight": b["fact_w"],
-                                        "floatCapUsdBn": b["cap"], "priceStatus": b["status"], "yahoo": b["ticker"]} for b in bm]},
+                                        "floatCapUsdBn": b["cap"], "priceStatus": b["status"], "yahoo": b["key"]} for b in bm]},
     }, separators=(",", ":")))
-
-    write_benchmark_xlsx(bm, fx)
+    write_benchmark_xlsx(bm, fx, dates, bm_series, series["MSCIAM"])
 
     # ---------- holdings workbook (mPower position-report layout; no cash line) ----------
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Holdings"
@@ -140,7 +161,7 @@ def main(path):
     print(f"wrote {OUT_XLSX} ({len(holding_rows)} holdings), {OUT_JSON}, {OUT_BM}")
     print("benchmark:", [(b["ticker"], round(b["weight"] * 100, 2)) for b in bm], "sum", round(sum(b["weight"] for b in bm), 6))
 
-def write_benchmark_xlsx(bm, fx):
+def write_benchmark_xlsx(bm, fx, dates, bm_series, index_series):
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Benchmark_Constituents"
     hdr = ["Ticker", "Security Name", "Country", "Currency", "Sector", "Float Adj Mkt Cap (USD bn)", "Index Weight, Factsheet (%)",
            "Benchmark Weight, Reconstituted to 100% (%)", "Local Price 23-Sep-2026", "Price Data Status", "Held in ALBFUND"]
@@ -160,6 +181,17 @@ def write_benchmark_xlsx(bm, fx):
     for i, w in enumerate([12, 36, 22, 12, 24, 22, 22, 26, 20, 40, 14], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = "A2"
+
+    ts = wb.create_sheet("Benchmark_Daily_USD")
+    ts.append(["Date", "Index (rebased 100)"] + [b["ticker"] + " (USD)" for b in bm])
+    for c in ts[1]: c.fill = HDR_FILL; c.font = HDR_FONT
+    for i, d in enumerate(dates):
+        ts.append([d, index_series[i]] + [round(bm_series[b["key"]][i], 6) for b in bm])
+    ts.freeze_panes = "B2"
+    ts.column_dimensions["A"].width = 12
+    last_r = ts.max_row
+    ts.cell(row=last_r + 2, column=1, value="Index return over the period").font = Font(bold=True)
+    ts.cell(row=last_r + 2, column=2, value=f"=B{last_r}/B2-1").number_format = "0.00%"
 
     cur = wb.create_sheet("Currency_Weights")
     cur.append(["Currency", "Benchmark Weight (%)"])
@@ -189,8 +221,10 @@ def write_benchmark_xlsx(bm, fx):
     for line in [
         "Source: MSCI Arabian Markets Index (USD) factsheet, top-10 constituents as supplied (Float Adj Mkt Cap USD bn, Index Wt %).",
         "Benchmark = these 10 constituents only. Index weights total 49.98%; each weight is divided by 49.98 so the benchmark sums to 100%.",
-        "No benchmark prices are simulated. Five names have a single statement price (23-Sep-2026); five have no price data.",
-        "Benchmark returns, sector and currency attribution are not computed until price history is supplied for all 10 names.",
+        "Benchmark prices are SIMULATED, not market data. Web sources had no usable daily history for these names.",
+        "Drift assumption: 5% a year for each constituent (stated assumption). The realised return depends on the simulated noise and is not targeted.",
+        "Anchors: five names use their 23-Sep-2026 statement price; Aramco, KFH, STC, e& and QNB use approximate levels (unverified).",
+        "Benchmark_Daily_USD holds the daily index. Sector and currency attribution use this series.",
     ]: nt.append([line])
     nt.column_dimensions["A"].width = 140
     wb.save(OUT_BM)
