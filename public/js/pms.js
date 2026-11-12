@@ -162,7 +162,10 @@ export function buildModelFromPortfolio(pf, builtin, benchmark = { id: 'PSEI', n
 
   // Benchmark: the constituents supplied in the source file, or the simulated PSEi.
   let benchmarkList = [];
-  if (bmSpec) {
+  if (bmSpec && bmSpec.priceHistory === false) {
+    // No benchmark price history in the source: the benchmark is not computed (nothing is simulated for it).
+    benchmarkList = [];
+  } else if (bmSpec) {
     const pushed = new Set(priceHistory.map((r) => r.ticker));
     for (const c of bmSpec.constituents) {
       benchmarkList.push({ ticker: c.ticker, yahoo: c.yahoo, name: c.name, sector: c.sector, country: c.country, currency: c.currency, weight: c.weight });
