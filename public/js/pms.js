@@ -24,6 +24,11 @@ const FIELDS = {
   bookCostPortfolio: ['bookcostinportfoliocurrency'],
 };
 // FX to the reporting currency (PHP); positions in other currencies are converted at these rates.
+// Rate quote for notes, to 2 decimals: "1 USD = 3.67 AED" (full precision is kept in the conversions).
+export function rateQuote(ccy, rate, base) {
+  if (rate == null) return '';
+  return rate >= 1 ? `1 ${ccy} = ${rate.toFixed(2)} ${base}` : `1 ${base} = ${(1 / rate).toFixed(2)} ${ccy}`;
+}
 export const FX_TO_PHP = { PHP: 1, USD: 62.5 };
 export const conv = (amount, ccy, fx = FX_TO_PHP) => (amount == null ? null : amount * (fx[(ccy || 'PHP').toUpperCase()] ?? 1));
 const num = (v) => (typeof v === 'number' ? v : v == null || v === '' ? null : Number(String(v).replace(/[,\s]/g, '')));
@@ -182,7 +187,7 @@ export function buildModelFromPortfolio(pf, builtin, benchmark = { id: 'PSEI', n
 
   ctx.info.push(`Valued on ${priceRange.max} at the reported market values; holdings treated as unchanged over ${config.periodStart} → ${priceRange.max}. Prices before ${config.periodStart} are simulated within ±10% of the statement prices for the VaR lookback and backtest.`);
   const fxUsed = [...new Set(pf.positions.map((p) => p.currency.toUpperCase()).filter((c) => c !== base))];
-  if (fxUsed.length) ctx.info.push(`Values in ${base}; ${fxUsed.map((c) => `${c} converted at ${fx[c] ?? 1} ${base} per unit`).join(', ')}.`);
+  if (fxUsed.length) ctx.info.push(`Values in ${base}; ${fxUsed.map((c) => `${c}: ${rateQuote(c, fx[c], base)}`).join('; ')}.`);
 
   return {
     config, holdings, transactions: [], cashFlows: [], benchmark: benchmarkList, scenarios: [], overrides: [],

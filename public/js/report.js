@@ -1,3 +1,4 @@
+import { rateQuote } from './pms.js';
 // Renders the four report tabs (plus data quality) with tables and Chart.js charts.
 
 const charts = [];
@@ -397,5 +398,5 @@ export function renderHoldings(el, ctx) {
   el.innerHTML = '<div class="kpis">' + kpi('Positions', String(pos.length)) + kpi('Book cost', fmt.php(tot.book, 2), BASE) + kpi('Market value', fmt.php(tot.mv, 2), BASE) +
     kpi('Unrealised gain', fmt.php(gain, 2), tot.book ? fmt.pct(tot.mv / tot.book - 1) : '') + '</div>' +
     '<div class="grid1">' + panel('Holdings', `<div class="tbl-wrap"><table><thead><tr><th class="l">Security</th><th class="l">Security Name</th><th>Book Cost in Transaction Currency</th><th>Market Value in Transaction Currency</th><th class="l">Portfolio</th></tr></thead><tbody>${body}<tr class="total"><td class="l">Total (${BASE})</td><td></td><td>${fmt.num(tot.book, 2)}</td><td>${fmt.num(tot.mv, 2)}</td><td></td></tr></tbody></table></div>`,
-      'Grouped by asset class as in the mPower report.' + (fx.length ? ` Totals in ${BASE}; ${fx.map((c) => `${c} converted at ${ctx.model.fxRates?.[c] ?? ''}`).join(', ')}.` : '')) + '</div>';
+      'Grouped by asset class as in the mPower report.' + (fx.length ? ` Totals in ${BASE}; ${fx.map((c) => rateQuote(c, ctx.model.fxRates?.[c], BASE)).join('; ')}.` : '')) + '</div>';
 }
