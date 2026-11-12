@@ -186,6 +186,7 @@ export function buildModelFromPortfolio(pf, builtin, benchmark = { id: 'PSEI', n
   return {
     config, holdings, transactions: [], cashFlows: [], benchmark: benchmarkList, scenarios: [], overrides: [],
     priceHistory, priceRange, priceSource: 'file', usedBuiltin: true, benchmarkSimulated: !bmSpec, fxRates: fx, baseCurrency: base,
+    benchmarkDefinition: bmSpec ? bmSpec.constituents : null,
     positions: pf.positions, errors: ctx.errors, warnings: ctx.warnings, info: ctx.info,
   };
 }

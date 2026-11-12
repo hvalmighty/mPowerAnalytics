@@ -38,19 +38,21 @@ SECTOR = {
 SIGMA = {"Financials":0.22,"Energy":0.26,"Communication Services":0.20,"Real Estate":0.28,
          "Industrials":0.24,"Health Care":0.22,"Information Technology":0.36}
 
-# MSCI Arabian Markets IMI (USD) top-10 constituents, factsheet as of 30-Oct-2026
-TOP10 = [  # ticker, statement code (None = no price data), name, country, currency, sector, factsheet weight %
- ("ALR", "ALR", "Al Rajhi Banking & Investment", "Saudi Arabia", "SAR", "Financials", 12.42),
- ("ARAMCO", None, "Saudi Aramco", "Saudi Arabia", "SAR", "Energy", 5.43),
- ("SNB", "SNB", "Saudi National Bank", "Saudi Arabia", "SAR", "Financials", 4.66),
- ("KFH", None, "Kuwait Finance House", "Kuwait", "KWD", "Financials", 3.56),
- ("NBK", "NBK", "National Bank of Kuwait", "Kuwait", "KWD", "Financials", 3.07),
- ("FAB", "FAB", "First Abu Dhabi Bank", "United Arab Emirates", "AED", "Financials", 2.90),
- ("STC", None, "Saudi Telecom Co", "Saudi Arabia", "SAR", "Communication Services", 2.85),
- ("ETEC", None, "Emirates Telecommunications Group", "United Arab Emirates", "AED", "Communication Services", 2.58),
- ("QNBK", None, "Qatar National Bank", "Qatar", "QAR", "Financials", 2.57),
- ("EMR", "EMR", "Emaar Properties", "United Arab Emirates", "AED", "Real Estate", 2.49),
+# MSCI Arabian Markets Index (USD): the 10 constituents from the supplied factsheet.
+# ticker, statement code (None = not in the statement), name, country, currency, sector, index weight %, float adj mkt cap USD bn
+TOP10 = [
+ ("ALR", "ALR", "Al Rajhi Banking & Investment", "Saudi Arabia", "SAR", "Financials", 14.59, 95.53),
+ ("ARAMCO", None, "Saudi Aramco", "Saudi Arabia", "SAR", "Energy", 6.38, 41.79),
+ ("SNB", "SNB", "Saudi National Bank", "Saudi Arabia", "SAR", "Financials", 5.48, 35.87),
+ ("KFH", None, "Kuwait Finance House", "Kuwait", "KWD", "Financials", 4.19, 27.40),
+ ("NBK", "NBK", "National Bank of Kuwait", "Kuwait", "KWD", "Financials", 3.61, 23.62),
+ ("FAB", "FAB", "First Abu Dhabi Bank", "United Arab Emirates", "AED", "Financials", 3.40, 22.28),
+ ("STC", None, "Saudi Telecom Co", "Saudi Arabia", "SAR", "Communication Services", 3.35, 21.94),
+ ("ETEC", None, "Emirates Telecommunications Group", "United Arab Emirates", "AED", "Communication Services", 3.03, 19.83),
+ ("QNBK", None, "Qatar National Bank", "Qatar", "QAR", "Financials", 3.02, 19.76),
+ ("EMR", "EMR", "Emaar Properties", "United Arab Emirates", "AED", "Real Estate", 2.93, 19.17),
 ]
+FACTSHEET_TOTAL = 49.98  # sum of the 10 index weights as published
 
 def read_statement(path):
     sh = xlrd.open_workbook(path).sheet_by_index(0)
@@ -79,11 +81,12 @@ def main(path):
     px_of = {r["code"]: r for r in rows}
 
     # ---------- benchmark: top-10 constituents with price data, rescaled to 100% ----------
-    have = [t for t in TOP10 if t[1] in px_of]
-    missing = [t for t in TOP10 if t[1] not in px_of]
-    tot = sum(t[6] for t in have)
-    bm = [dict(ticker=t[0], name=t[2], country=t[3], currency=t[4], sector=t[5], fact_w=t[6],
-               weight=t[6] / tot, local_px=px_of[t[1]]["price"], held=True) for t in have]
+    # All 10 supplied constituents; weights reconstituted to 100% in proportion to the published weights.
+    bm = [dict(ticker=t[0], name=t[2], country=t[3], currency=t[4], sector=t[5], fact_w=t[6], cap=t[7],
+               weight=t[6] / FACTSHEET_TOTAL, local_px=(px_of[t[1]]["price"] if t[1] in px_of else None),
+               held=(t[1] in px_of),
+               status=("Statement price 23-Sep-2026 only (no history)" if t[1] in px_of else "No price data")) for t in TOP10]
+    assert abs(sum(b["weight"] for b in bm) - 1) < 1e-9
 
     # ---------- holdings price history (simulated, anchored to the statement prices) ----------
     dates = []; d = START
@@ -110,12 +113,13 @@ def main(path):
         "base": "USD", "valuationDate": VAL_DATE.isoformat(), "fx": fx,
         "dates": dates, "series": series,
         "benchmark": {"id": "MSCIAM", "name": "MSCI Arabian Markets IMI Index (USD), top-10 constituents with price data",
-                      "asOf": "2026-10-30", "priceHistory": False,
+                      "source": "MSCI Arabian Markets Index (USD) factsheet, top-10 constituents (supplied)", "priceHistory": False,
                       "constituents": [{"ticker": b["ticker"], "name": b["name"], "sector": b["sector"], "country": b["country"],
-                                        "currency": b["currency"], "weight": round(b["weight"], 8), "yahoo": b["ticker"]} for b in bm]},
+                                        "currency": b["currency"], "weight": round(b["weight"], 8), "factsheetWeight": b["fact_w"],
+                                        "floatCapUsdBn": b["cap"], "priceStatus": b["status"], "yahoo": b["ticker"]} for b in bm]},
     }, separators=(",", ":")))
 
-    write_benchmark_xlsx(bm, missing, fx)
+    write_benchmark_xlsx(bm, fx)
 
     # ---------- holdings workbook (mPower position-report layout; no cash line) ----------
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Holdings"
@@ -136,24 +140,24 @@ def main(path):
     print(f"wrote {OUT_XLSX} ({len(holding_rows)} holdings), {OUT_JSON}, {OUT_BM}")
     print("benchmark:", [(b["ticker"], round(b["weight"] * 100, 2)) for b in bm], "sum", round(sum(b["weight"] for b in bm), 6))
 
-def write_benchmark_xlsx(bm, missing, fx):
+def write_benchmark_xlsx(bm, fx):
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Benchmark_Constituents"
-    hdr = ["Ticker", "Security Name", "Country", "Currency", "Sector", "Factsheet Weight (%)", "Benchmark Weight (%)",
-           "Local Price 23-Sep-2026", "Price Source", "Held in ALBFUND"]
+    hdr = ["Ticker", "Security Name", "Country", "Currency", "Sector", "Float Adj Mkt Cap (USD bn)", "Index Weight, Factsheet (%)",
+           "Benchmark Weight, Reconstituted to 100% (%)", "Local Price 23-Sep-2026", "Price Data Status", "Held in ALBFUND"]
     ws.append(hdr)
     for c in ws[1]: c.fill = HDR_FILL; c.font = HDR_FONT; c.alignment = Alignment(wrap_text=True)
     first = 2
     for b in bm:
-        ws.append([b["ticker"], b["name"], b["country"], b["currency"], b["sector"], b["fact_w"], None,
-                   b["local_px"], "Statement, 23-Sep-2026", "Yes" if b["held"] else "No"])
+        ws.append([b["ticker"], b["name"], b["country"], b["currency"], b["sector"], b["cap"], b["fact_w"], None,
+                   b["local_px"], b["status"], "Yes" if b["held"] else "No"])
     last = ws.max_row
     for r in range(first, last + 1):
-        ws.cell(row=r, column=7, value=f"=F{r}/SUM($F${first}:$F${last})*100")
-    ws.append(["TOTAL", "", "", "", "", f"=SUM(F{first}:F{last})", f"=SUM(G{first}:G{last})"])
+        ws.cell(row=r, column=8, value=f"=G{r}/SUM($G${first}:$G${last})*100")
+    ws.append(["TOTAL", "", "", "", "", f"=SUM(F{first}:F{last})", f"=SUM(G{first}:G{last})", f"=SUM(H{first}:H{last})"])
     ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
-    for row in ws.iter_rows(min_row=first, max_row=ws.max_row, min_col=6, max_col=7):
+    for row in ws.iter_rows(min_row=first, max_row=ws.max_row, min_col=6, max_col=8):
         for c in row: c.number_format = "0.00"
-    for i, w in enumerate([12, 36, 22, 12, 24, 20, 22, 22, 24, 16], 1):
+    for i, w in enumerate([12, 36, 22, 12, 24, 22, 22, 26, 20, 40, 14], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = "A2"
 
@@ -161,33 +165,32 @@ def write_benchmark_xlsx(bm, missing, fx):
     cur.append(["Currency", "Benchmark Weight (%)"])
     for c in cur[1]: c.fill = HDR_FILL; c.font = HDR_FONT
     for ccy in sorted({b["currency"] for b in bm}):
-        cur.append([ccy, f"=SUMIF(Benchmark_Constituents!$D${first}:$D${last},A{cur.max_row + 1},Benchmark_Constituents!$G${first}:$G${last})"])
+        r = cur.max_row + 1
+        cur.append([ccy, f"=SUMIF(Benchmark_Constituents!$D${first}:$D${last},A{r},Benchmark_Constituents!$H${first}:$H${last})"])
     cur.column_dimensions["A"].width = 14; cur.column_dimensions["B"].width = 22
 
-    ex = wb.create_sheet("Top10_Excluded")
-    ex.append(["Ticker", "Security Name", "Country", "Currency", "Sector", "Factsheet Weight (%)", "Reason"])
-    for c in ex[1]: c.fill = HDR_FILL; c.font = HDR_FONT
-    for t in missing:
-        ex.append([t[0], t[2], t[3], t[4], t[5], t[6], "No price data in the statement or any other file supplied"])
-    ex.column_dimensions["B"].width = 36; ex.column_dimensions["G"].width = 60
+    cty = wb.create_sheet("Country_Weights")
+    cty.append(["Country", "Benchmark Weight (%)"])
+    for c in cty[1]: c.fill = HDR_FILL; c.font = HDR_FONT
+    for ctry in sorted({b["country"] for b in bm}):
+        r = cty.max_row + 1
+        cty.append([ctry, f"=SUMIF(Benchmark_Constituents!$C${first}:$C${last},A{r},Benchmark_Constituents!$H${first}:$H${last})"])
+    cty.column_dimensions["A"].width = 24; cty.column_dimensions["B"].width = 22
 
-    fact = wb.create_sheet("Factsheet_Reference")
-    fact.append(["Country (factsheet, 30-Oct-2026)", "Weight (%)"])
-    for k, v in [("Saudi Arabia", 53.18), ("United Arab Emirates", 21.23), ("Kuwait", 10.1), ("Qatar", 8.37), ("Morocco", 2.54), ("Other", 4.58)]:
-        fact.append([k, v])
-    fact.append([]); fact.append(["Sector (factsheet, 30-Oct-2026)", "Weight (%)"])
-    for sec, w in [("Financials", 52.29), ("Communication Services", 9.09), ("Energy", 9.08), ("Materials", 8.35), ("Real Estate", 6.5),
-                   ("Industrials", 4.59), ("Utilities", 3.01), ("Consumer Discretionary", 2.76), ("Consumer Staples", 1.97), ("Health Care", 1.71), ("Information Technology", 0.63)]:
-        fact.append([sec, w])
-    fact.column_dimensions["A"].width = 36
+    sec = wb.create_sheet("Sector_Weights")
+    sec.append(["Sector", "Benchmark Weight (%)"])
+    for c in sec[1]: c.fill = HDR_FILL; c.font = HDR_FONT
+    for s_ in sorted({b["sector"] for b in bm}):
+        r = sec.max_row + 1
+        sec.append([s_, f"=SUMIF(Benchmark_Constituents!$E${first}:$E${last},A{r},Benchmark_Constituents!$H${first}:$H${last})"])
+    sec.column_dimensions["A"].width = 26; sec.column_dimensions["B"].width = 22
 
     nt = wb.create_sheet("Notes")
     for line in [
-        "Source: MSCI Arabian Markets IMI Index (USD) factsheet as of 30-Oct-2026: top-10 weights, country and sector weights.",
-        "Benchmark = the top-10 constituents that have price data (5 names). Their factsheet weights are rescaled to sum to 100%.",
-        "The 5 excluded top-10 names (Aramco, KFH, STC, e&, QNB) have no price data, so they are not in the benchmark.",
-        "Only one price date (23-Sep-2026) is available for these names. No benchmark price history exists, so benchmark returns and attribution are not computed.",
-        "Local prices are from the holding statement. Country and currency are from the factsheet and the names' listing markets.",
+        "Source: MSCI Arabian Markets Index (USD) factsheet, top-10 constituents as supplied (Float Adj Mkt Cap USD bn, Index Wt %).",
+        "Benchmark = these 10 constituents only. Index weights total 49.98%; each weight is divided by 49.98 so the benchmark sums to 100%.",
+        "No benchmark prices are simulated. Five names have a single statement price (23-Sep-2026); five have no price data.",
+        "Benchmark returns, sector and currency attribution are not computed until price history is supplied for all 10 names.",
     ]: nt.append([line])
     nt.column_dimensions["A"].width = 140
     wb.save(OUT_BM)

@@ -17,7 +17,7 @@ function carinoLink(dailyEffects, rp, rb) {
 // Currency segments use the local transaction currency; FX translation is not modelled (no FX history).
 export function computeAttribution(model, panel, book, field = 'sector') {
   const { config, benchmark } = model;
-  if (!benchmark.length) return { skipped: 'No Benchmark_Constituents sheet supplied.' };
+  if (!benchmark.length) return { skipped: model.benchmarkDefinition ? 'Benchmark price history not supplied: benchmark returns and attribution are not computed. The constituents are listed below.' : 'No Benchmark_Constituents sheet supplied.' };
   const { series } = panel;
   const { T, i0, V, dates } = book;
   const warnings = [];

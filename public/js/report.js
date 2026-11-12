@@ -272,7 +272,16 @@ export function renderPerformance(el, ctx) {
 // ===================================================================== ATTRIBUTION
 export function renderAttribution(el, ctx) {
   const a = ctx.attr;
-  if (!a || a.skipped) { el.innerHTML = `<div class="msg warn">${esc(a ? a.skipped : 'Attribution not computed.')}</div>`; return; }
+  const def = ctx.model && ctx.model.benchmarkDefinition;
+  const defHtml = def ? '<div class="grid1">' + panel(`${esc(ctx.model.config.benchmarkName || 'Benchmark')} — constituents (reconstituted to 100%)`, table([
+    { h: 'Security', l: true, f: (x) => esc(x.name) }, { h: 'Ticker', l: true, f: (x) => esc(x.ticker) },
+    { h: 'Country', l: true, f: (x) => esc(x.country) }, { h: 'Currency', l: true, f: (x) => esc(x.currency) },
+    { h: 'Sector', l: true, f: (x) => esc(x.sector) }, { h: 'Float cap (USD bn)', f: (x) => x.floatCapUsdBn.toFixed(2) },
+    { h: 'Factsheet wt', f: (x) => x.factsheetWeight.toFixed(2) + '%' }, { h: 'Benchmark wt', f: (x) => fmt.pct(x.weight, 2) },
+    { h: 'Price data', l: true, f: (x) => esc(x.priceStatus) },
+  ], def, { name: 'Total', ticker: '', country: '', currency: '', sector: '', priceStatus: '', factsheetWeight: def.reduce((s, x) => s + x.factsheetWeight, 0), weight: 1, floatCapUsdBn: def.reduce((s, x) => s + x.floatCapUsdBn, 0) }),
+  'Weights are the published index weights divided by their total (49.98%). No benchmark prices are simulated.') + '</div>' : '';
+  if (!a || a.skipped) { el.innerHTML = `<div class="msg warn">${esc(a ? a.skipped : 'Attribution not computed.')}</div>` + defHtml; return; }
   let html = '<div class="kpis">';
   html += kpi('Portfolio return', fmt.pct(a.portReturn));
   html += kpi('Benchmark (constituents)', fmt.pct(a.benchReturn), a.officialBench != null ? `official index ${fmt.pct(a.officialBench)}` : '');
