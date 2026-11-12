@@ -421,6 +421,39 @@ export function renderRebalance(el, ctx) {
   ];
   const total = { name: 'Total', ticker: '', currency: '', country: '', wp: R.rows.reduce((s, r) => s + r.wp, 0), wb: R.rows.reduce((s, r) => s + r.wb, 0), active: 0, mv: R.nav, target: R.rows.reduce((s, r) => s + r.target, 0), action: '', amount: R.totals.net, localPx: null, units: null, note: 'Net of buys and sells is zero (no cash is held).' };
   const body = table(cols, R.rows.filter((r) => r.action !== 'Hold' || r.note), total);
-  el.innerHTML = kpis + panel('Portfolio vs benchmark — rebalancing orders', body,
+  el.innerHTML = kpis + panel('Portfolio vs benchmark — rebalancing orders',
+    `<div style="margin:0 0 10px"><button id="btnGenOrders" class="icon-btn text" type="button">Generate orders</button></div>` + body,
     `Target value = benchmark weight × current NAV, as at ${esc(R.asOf)}. Units are whole units at the statement price. Names with no price data show an amount only. Trading costs, lot sizes and FX moves are not modelled.`);
+  el.querySelector('#btnGenOrders').addEventListener('click', () => openOrdersPopup(R));
+}
+
+// Pop-up grid of the orders to place (buys and sells only).
+function openOrdersPopup(R) {
+  const orders = R.rows.filter((r) => r.action !== 'Hold');
+  const cols = [
+    { h: 'Action', l: true, f: (x) => `<b>${x.action}</b>` }, { h: 'Security', l: true, f: (x) => esc(x.name) },
+    { h: 'Ticker', l: true, f: (x) => esc(x.ticker) }, { h: 'Ccy', l: true, f: (x) => esc(x.currency) },
+    { h: 'Order amount', f: (x) => fmt.php(x.amount, 0), v: (x) => x.amount, signed: true },
+    { h: 'Price (local)', f: (x) => (x.localPx != null ? x.localPx.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : '–') },
+    { h: 'Units', f: (x) => (x.units == null ? 'Enter price' : (x.action === 'Sell' ? '−' : '') + Math.abs(x.units).toLocaleString('en-US')), v: (x) => x.units, signed: true },
+    { h: 'Note', l: true, wrap: true, f: (x) => esc(x.note) },
+  ];
+  const total = { name: `${orders.length} orders`, ticker: '', currency: '', action: '', amount: R.totals.net, localPx: null, units: null,
+    note: `Buys ${fmt.php(R.totals.buys, 0)} · Sells ${fmt.php(R.totals.sells, 0)}` };
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML = `<div role="dialog" aria-label="Rebalancing orders" style="background:#fff;color:#000;max-width:1100px;width:100%;max-height:85vh;overflow:auto;border-radius:8px;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h3 style="margin:0;color:#19395c">Rebalancing orders</h3>
+      <button type="button" id="btnCloseOrders" aria-label="Close" style="border:0;background:none;font-size:22px;cursor:pointer;color:#000">×</button>
+    </div>
+    <p style="margin:0 0 12px;font-size:13px">Orders to align the portfolio to the benchmark as at ${esc(R.asOf)}. Units are whole units at the statement price. Names with no price data need a price before they can be sized.</p>
+    ${table(cols, orders, total)}
+  </div>`;
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('#btnCloseOrders').addEventListener('click', close);
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(overlay);
 }
