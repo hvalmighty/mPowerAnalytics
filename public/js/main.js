@@ -289,9 +289,9 @@ function exportExcel() {
     add('Attribution_Monthly', attr.monthly.map((x) => ({ Month: x.month, Portfolio: r4(x.port), Benchmark: r4(x.bench), Allocation: r4(x.alloc), Selection: r4(x.sel), Interaction: r4(x.inter) })));
   }
   if (ctx.rebal) {
-    add('Rebalance_Orders', ctx.rebal.rows.map((x) => ({ Ticker: x.ticker, Security: x.name, Currency: x.currency, Country: x.country, Sector: x.sector,
-      Port_Weight: r4(x.wp), Bench_Weight: r4(x.wb), Active_Weight: r4(x.active), Current_Value: r2(x.mv), Target_Value: r2(x.target),
-      Action: x.action, Order_Amount: r2(x.amount), Price_Local: x.localPx != null ? r4(x.localPx) : '', Units: x.units ?? '', Note: x.note })));
+    add('Rebalance_Orders', ctx.rebal.rows.filter((x) => x.action === 'Buy' || x.mv > 0 || x.wb > 0).map((x) => ({ Ticker: x.ticker, Security: x.name, Currency: x.currency, Country: x.country,
+      Current_Weight: r4(x.wp), Benchmark_Weight: r4(x.wb), Proposed_Weight: r4(x.newW), Active_After: r4(x.active),
+      Current_Value: r2(x.mv), Order_Amount: r2(x.amount), Action: x.action, Price_Local: x.localPx != null ? r4(x.localPx) : '', Units_To_Buy: x.units ?? '', Note: x.note })));
   }
   if (ctx.attrCcy && !ctx.attrCcy.skipped) {
     add('Currency_Attribution', ctx.attrCcy.rows.map((x) => ({ Currency: x.segment, Port_Weight: r4(x.wp), Bench_Weight: r4(x.wb), Port_Return: r4(x.rp), Bench_Return: r4(x.rb), Allocation: r4(x.alloc), Selection: r4(x.sel), Interaction: r4(x.inter), Total: r4(x.total) })));

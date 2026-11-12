@@ -1,3 +1,4 @@
+import { buildRebalance } from './rebalance.js';
 import { rateQuote } from './pms.js';
 // Renders the four report tabs (plus data quality) with tables and Chart.js charts.
 
@@ -401,66 +402,73 @@ export function renderHoldings(el, ctx) {
       'Grouped by asset class as in the mPower report.' + (fx.length ? ` Totals in ${BASE}; ${fx.map((c) => rateQuote(c, ctx.model.fxRates?.[c], BASE)).join('; ')}.` : '')) + '</div>';
 }
 
-// Rebalancing tab: portfolio vs benchmark weights and the orders that align the portfolio to the benchmark.
+// Rebalancing tab: buy-only alignment to the benchmark. Order quantities are editable and recompute the allocation.
 export function renderRebalance(el, ctx) {
   const R = ctx.rebal;
   if (!R) { el.innerHTML = `<div class="msg warn">Rebalancing needs a benchmark with constituents. This portfolio has none.</div>`; return; }
   const money = (x) => fmt.php(x, 0);
-  const kpis = `<div class="grid4">${kpi('NAV (current)', money(R.nav), 'Valued at the statement market values')}${kpi('Total buys', money(R.totals.buys), `${R.totals.orders} orders in total`)}${kpi('Total sells', money(R.totals.sells), 'Sells fund the buys')}${kpi('Turnover', fmt.pct(R.totals.turnover, 1), 'Buys as a share of NAV')}</div>`;
+  const pct = (x) => fmt.pct(x, 2);
+  const kpis = `<div class="grid4">${kpi('Current NAV', money(R.nav), 'Statement market values')}${kpi('Cash required', money(R.totals.cashRequired), 'Total buys. Nothing is sold.')}${kpi('Mismatch before', pct(R.totals.mismatchBefore), 'Half the sum of |portfolio − benchmark| weights')}${kpi('Mismatch after', pct(R.totals.mismatchAfter), `New NAV ${money(R.newNav)}`)}</div>`;
   const cols = [
     { h: 'Security', l: true, f: (x) => esc(x.name) }, { h: 'Ticker', l: true, f: (x) => esc(x.ticker) },
-    { h: 'Ccy', l: true, f: (x) => esc(x.currency) }, { h: 'Country', l: true, f: (x) => esc(x.country) },
-    { h: 'Port. wt', f: (x) => fmt.pct(x.wp, 2) }, { h: 'Bench. wt', f: (x) => fmt.pct(x.wb, 2) },
-    { h: 'Active wt', f: (x) => fmt.pct(x.active, 2), v: (x) => x.active, signed: true },
-    { h: 'Current value', f: (x) => fmt.php(x.mv, 0) }, { h: 'Target value', f: (x) => fmt.php(x.target, 0) },
-    { h: 'Action', l: true, f: (x) => `<b>${x.action}</b>` },
-    { h: 'Order amount', f: (x) => fmt.php(x.amount, 0), v: (x) => x.amount, signed: true },
+    { h: 'Ccy', l: true, f: (x) => esc(x.currency) },
+    { h: 'Current wt', f: (x) => pct(x.wp) }, { h: 'Bench. wt', f: (x) => pct(x.wb) },
+    { h: 'Proposed wt', f: (x) => pct(x.newW) }, { h: 'Active after', f: (x) => pct(x.active), v: (x) => x.active, signed: true },
+    { h: 'Order amount (USD)', f: (x) => (x.priced ? fmt.php(x.amount, 0) : `<input type="number" min="0" step="1" value="${Math.round(x.amount)}" data-ticker="${esc(x.ticker)}" style="width:130px">`) },
     { h: 'Price (local)', f: (x) => (x.localPx != null ? x.localPx.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : '–') },
-    { h: 'Units', f: (x) => (x.units == null ? 'n/a' : x.units.toLocaleString('en-US')), v: (x) => x.units, signed: true },
+    { h: 'Units to buy', f: (x) => (x.priced ? `<input type="number" min="0" step="1" value="${x.units}" data-ticker="${esc(x.ticker)}" style="width:110px">` : 'n/a') },
     { h: 'Note', l: true, wrap: true, f: (x) => esc(x.note) },
   ];
-  const total = { name: 'Total', ticker: '', currency: '', country: '', wp: R.rows.reduce((s, r) => s + r.wp, 0), wb: R.rows.reduce((s, r) => s + r.wb, 0), active: 0, mv: R.nav, target: R.rows.reduce((s, r) => s + r.target, 0), action: '', amount: R.totals.net, localPx: null, units: null, note: 'Net of buys and sells is zero (no cash is held).' };
-  const body = table(cols, R.rows.filter((r) => r.action !== 'Hold' || r.note), total);
-  el.innerHTML = kpis + panel('Portfolio vs benchmark — rebalancing orders',
+  const total = { name: 'Total', ticker: '', currency: '', wp: R.rows.reduce((s, r) => s + r.wp, 0), wb: R.rows.reduce((s, r) => s + r.wb, 0),
+    newW: R.rows.reduce((s, r) => s + r.newW, 0), active: 0, amount: R.totals.cashRequired, priced: true, localPx: null, units: null,
+    note: 'Cash required = total buys. Holdings outside the benchmark are kept.' };
+  const shown = R.rows.filter((r) => r.action === 'Buy' || r.mv > 0 || r.wb > 0);
+  const body = table(cols, shown, total);
+  el.innerHTML = kpis + panel('Portfolio vs benchmark — buy-only rebalancing',
     `<div style="margin:0 0 10px"><button id="btnGenOrders" type="button" style="padding:8px 16px;border:2px solid #1565c0;background:#fff;color:#1565c0;border-radius:6px;cursor:pointer;font-weight:700;font-size:14px">Generate orders</button></div>` + body,
-    `Target value = benchmark weight × current NAV, as at ${esc(R.asOf)}. Units are whole units at the statement price. Names with no price data show an amount only. Trading costs, lot sizes and FX moves are not modelled.`);
+    `Each benchmark name is lifted toward its benchmark weight of the current NAV. Nothing is sold; the cash required is the total of the buys. Edit a quantity (or amount, for names without a price) to see the allocation and mismatch recompute. As at ${esc(R.asOf)}; statement prices; trading costs, lot sizes and FX moves are not modelled.`);
   el.querySelector('#btnGenOrders').addEventListener('click', () => openOrdersPopup(R));
+  el.querySelectorAll('input[data-ticker]').forEach((inp) => inp.addEventListener('change', () => {
+    const ov = { ...(R.overrides || {}), [inp.dataset.ticker]: Number(inp.value) || 0 };
+    ctx.rebal = buildRebalance(ctx.model, ov);
+    renderRebalance(el, ctx);
+  }));
 }
 
-// Pop-up grid of the orders to place (buys and sells only).
+// Pop-up grid of the buy orders and the cash required.
 function openOrdersPopup(R) {
-  const orders = R.rows.filter((r) => r.action !== 'Hold');
+  const orders = R.rows.filter((r) => r.action === 'Buy');
   const cols = [
-    { h: 'Action', l: true, f: (x) => `<b>${x.action}</b>` }, { h: 'Security', l: true, f: (x) => esc(x.name) },
+    { h: 'Action', l: true, f: () => '<b>Buy</b>' }, { h: 'Security', l: true, f: (x) => esc(x.name) },
     { h: 'Ticker', l: true, f: (x) => esc(x.ticker) }, { h: 'Ccy', l: true, f: (x) => esc(x.currency) },
     { h: 'Order amount', f: (x) => fmt.php(x.amount, 0), v: (x) => x.amount, signed: true },
     { h: 'Price (local)', f: (x) => (x.localPx != null ? x.localPx.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : '–') },
-    { h: 'Units', f: (x) => (x.units == null ? 'Enter price' : (x.action === 'Sell' ? '−' : '') + Math.abs(x.units).toLocaleString('en-US')), v: (x) => x.units, signed: true },
+    { h: 'Units', f: (x) => (x.units == null ? 'Enter price' : x.units.toLocaleString('en-US')), v: (x) => x.units, signed: true },
     { h: 'Note', l: true, wrap: true, f: (x) => esc(x.note) },
   ];
-  const total = { name: `${orders.length} orders`, ticker: '', currency: '', action: '', amount: R.totals.net, localPx: null, units: null,
-    note: `Buys ${fmt.php(R.totals.buys, 0)} · Sells ${fmt.php(R.totals.sells, 0)}` };
+  const total = { name: `${orders.length} buy orders`, ticker: '', currency: '', action: '', amount: R.totals.cashRequired, localPx: null, units: null,
+    note: 'Cash required. No sells.' };
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px';
   overlay.innerHTML = `<div role="dialog" aria-label="Rebalancing orders" style="background:#fff;color:#000;max-width:1100px;width:100%;max-height:85vh;overflow:auto;border-radius:8px;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.3)">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <h3 style="margin:0;color:#19395c">Rebalancing orders</h3>
+      <h3 style="margin:0;color:#19395c">Rebalancing orders (buy only)</h3>
       <button type="button" id="btnCloseOrders" aria-label="Close" style="border:0;background:none;font-size:22px;cursor:pointer;color:#000">×</button>
     </div>
     <div style="display:flex;justify-content:flex-end;margin:0 0 10px">
       <button type="button" id="btnPushOrders" title="Downloads the orders as an Excel file for loading into your PMS or broker. No direct connection exists." style="padding:8px 16px;border:0;background:#1565c0;color:#fff;border-radius:6px;cursor:pointer;font-weight:700;font-size:14px">Push orders (download Excel)</button>
     </div>
-    <p style="margin:0 0 12px;font-size:13px">Orders to align the portfolio to the benchmark as at ${esc(R.asOf)}. Units are whole units at the statement price. Names with no price data need a price before they can be sized.</p>
-    ${table(cols, orders, total)}
+    <p style="margin:0 0 12px;font-size:13px">Buy orders as at ${esc(R.asOf)}. Units are whole units at the statement price. Names with no price data need a price before they can be sized.</p>
+    ${orders.length ? table(cols, orders, total) : '<p>No buy orders: the portfolio is already at or above benchmark weights for every name.</p>'}
   </div>`;
   const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   overlay.querySelector('#btnCloseOrders').addEventListener('click', close);
   overlay.querySelector('#btnPushOrders').addEventListener('click', () => {
-    const rows = orders.map((x) => ({ Action: x.action, Security: x.name, Ticker: x.ticker, Currency: x.currency, Order_Amount: Math.round(x.amount * 100) / 100,
+    const rows = orders.map((x) => ({ Action: 'Buy', Security: x.name, Ticker: x.ticker, Currency: x.currency, Order_Amount: Math.round(x.amount * 100) / 100,
       Price_Local: x.localPx != null ? Math.round(x.localPx * 10000) / 10000 : '', Units: x.units ?? '', Note: x.note }));
-    rows.push({ Action: 'Net', Order_Amount: Math.round(R.totals.net * 100) / 100 });
+    rows.push({ Action: 'Cash required', Order_Amount: Math.round(R.totals.cashRequired * 100) / 100 });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Orders');
     XLSX.writeFile(wb, `Rebalance_Orders_${String(R.asOf).slice(0, 10)}.xlsx`);
