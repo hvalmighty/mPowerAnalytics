@@ -415,13 +415,11 @@ export function renderRebalance(el, ctx) {
     { h: 'Current wt', f: (x) => pct(x.wp) }, { h: 'Bench. wt', f: (x) => pct(x.wb) },
     { h: 'Proposed wt', f: (x) => pct(x.newW) }, { h: 'Active after', f: (x) => pct(x.active), v: (x) => x.active, signed: true },
     { h: 'Order amount (USD)', f: (x) => fmt.php(x.amount, 0) },
-    { h: 'Price (local)', f: (x) => (x.localPx != null ? x.localPx.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) + (x.isSim ? ' (sim.)' : '') : '–') },
+    { h: 'Price (local)', f: (x) => (x.localPx != null ? x.localPx.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : '–') },
     { h: 'Units to buy', f: (x) => (x.priced ? `<input type="number" min="0" step="1" value="${x.units}" data-ticker="${esc(x.ticker)}" style="width:110px">` : 'n/a') },
-    { h: 'Note', l: true, wrap: true, f: (x) => esc(x.note) },
   ];
   const total = { name: 'Total', ticker: '', currency: '', wp: R.rows.reduce((s, r) => s + r.wp, 0), wb: R.rows.reduce((s, r) => s + r.wb, 0),
-    newW: R.rows.reduce((s, r) => s + r.newW, 0), active: 0, amount: R.totals.cashRequired, priced: true, localPx: null, units: null,
-    note: 'Cash required = total buys. Holdings outside the benchmark are kept.' };
+    newW: R.rows.reduce((s, r) => s + r.newW, 0), active: 0, amount: R.totals.cashRequired, priced: true, localPx: null, units: null };
   const shown = R.rows.filter((r) => r.action === 'Buy' || r.mv > 0 || r.wb > 0);
   const body = table(cols, shown, total);
   el.innerHTML = kpis + panel('Portfolio vs benchmark — buy-only rebalancing',
@@ -443,11 +441,9 @@ function openOrdersPopup(R) {
     { h: 'Ticker', l: true, f: (x) => esc(x.ticker) }, { h: 'Ccy', l: true, f: (x) => esc(x.currency) },
     { h: 'Order amount', f: (x) => fmt.php(x.amount, 0), v: (x) => x.amount, signed: true },
     { h: 'Price (local)', f: (x) => (x.localPx != null ? x.localPx.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : '–') },
-    { h: 'Units', f: (x) => (x.units == null ? 'n/a' : x.units.toLocaleString('en-US') + (x.isSim ? ' (sim. price)' : '')), v: (x) => x.units, signed: true },
-    { h: 'Note', l: true, wrap: true, f: (x) => esc(x.note) },
+    { h: 'Units', f: (x) => (x.units == null ? 'n/a' : x.units.toLocaleString('en-US')), v: (x) => x.units, signed: true },
   ];
-  const total = { name: `${orders.length} buy orders`, ticker: '', currency: '', action: '', amount: R.totals.cashRequired, localPx: null, units: null,
-    note: 'Cash required. No sells.' };
+  const total = { name: `${orders.length} buy orders`, ticker: '', currency: '', action: '', amount: R.totals.cashRequired, localPx: null, units: null };
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px';
   overlay.innerHTML = `<div role="dialog" aria-label="Rebalancing orders" style="background:#fff;color:#000;max-width:1100px;width:100%;max-height:85vh;overflow:auto;border-radius:8px;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.3)">
@@ -467,7 +463,7 @@ function openOrdersPopup(R) {
   overlay.querySelector('#btnCloseOrders').addEventListener('click', close);
   overlay.querySelector('#btnPushOrders').addEventListener('click', () => {
     const rows = orders.map((x) => ({ Action: 'Buy', Security: x.name, Ticker: x.ticker, Currency: x.currency, Order_Amount: Math.round(x.amount * 100) / 100,
-      Price_Local: x.localPx != null ? Math.round(x.localPx * 10000) / 10000 : '', Units: x.units ?? '', Note: x.note }));
+      Price_Local: x.localPx != null ? Math.round(x.localPx * 10000) / 10000 : '', Units: x.units ?? '' }));
     rows.push({ Action: 'Cash required', Order_Amount: Math.round(R.totals.cashRequired * 100) / 100 });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Orders');
