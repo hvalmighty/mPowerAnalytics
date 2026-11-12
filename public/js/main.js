@@ -3,7 +3,8 @@ import { fetchPrices, buildPanel, buildBook, dataQuality } from './data.js';
 import { computeRisk } from './risk.js';
 import { computePerformance } from './performance.js';
 import { computeAttribution } from './attribution.js';
-import { renderSummary, renderRisk, renderPerformance, renderAttribution, renderDQ, renderHoldings, destroyCharts, setBase } from './report.js';
+import { renderSummary, renderRisk, renderPerformance, renderAttribution, renderDQ, renderHoldings, destroyCharts, setBase, renderRebalance } from './report.js';
+import { buildRebalance } from './rebalance.js';
 import { isPositionReport, parsePositionReport, buildModelFromPortfolio } from './pms.js';
 
 const $ = (id) => document.getElementById(id);
@@ -216,7 +217,9 @@ async function run() {
     try { attrCcy = computeAttribution(model, panel, book, 'currency'); } catch (e) { attrCcy = { skipped: 'Currency attribution failed: ' + e.message }; console.error(e); }
     const dq = dataQuality(model, panel, fetched, book);
 
-    ctx = { model, fetched, panel, book, risk, perf, attr, attrCcy, dq, msgs };
+    let rebal = null;
+    try { rebal = buildRebalance(model); } catch (e) { console.error(e); }
+    ctx = { model, fetched, panel, book, risk, perf, attr, attrCcy, rebal, dq, msgs };
     window.pseReport = ctx; // inspect every intermediate result from the browser console
     render();
     ok = true;
@@ -246,6 +249,7 @@ function render() {
   renderRisk($('tab-risk'), ctx);
   renderPerformance($('tab-perf'), ctx);
   renderAttribution($('tab-attr'), ctx);
+  renderRebalance($('tab-rebal'), ctx);
   renderDQ($('tab-dq'), ctx);
   // charts in hidden tabs need a resize once shown
   document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => window.dispatchEvent(new Event('resize')), { once: true }));
@@ -283,6 +287,11 @@ function exportExcel() {
   if (attr && !attr.skipped) {
     add('Attribution', attr.rows.map((x) => ({ Sector: x.sector, Port_Weight: r4(x.wp), Bench_Weight: r4(x.wb), Port_Return: r4(x.rp), Bench_Return: r4(x.rb), Allocation: r4(x.alloc), Selection: r4(x.sel), Interaction: r4(x.inter), Total: r4(x.total) })));
     add('Attribution_Monthly', attr.monthly.map((x) => ({ Month: x.month, Portfolio: r4(x.port), Benchmark: r4(x.bench), Allocation: r4(x.alloc), Selection: r4(x.sel), Interaction: r4(x.inter) })));
+  }
+  if (ctx.rebal) {
+    add('Rebalance_Orders', ctx.rebal.rows.map((x) => ({ Ticker: x.ticker, Security: x.name, Currency: x.currency, Country: x.country, Sector: x.sector,
+      Port_Weight: r4(x.wp), Bench_Weight: r4(x.wb), Active_Weight: r4(x.active), Current_Value: r2(x.mv), Target_Value: r2(x.target),
+      Action: x.action, Order_Amount: r2(x.amount), Price_Local: x.localPx != null ? r4(x.localPx) : '', Units: x.units ?? '', Note: x.note })));
   }
   if (ctx.attrCcy && !ctx.attrCcy.skipped) {
     add('Currency_Attribution', ctx.attrCcy.rows.map((x) => ({ Currency: x.segment, Port_Weight: r4(x.wp), Bench_Weight: r4(x.wb), Port_Return: r4(x.rp), Bench_Return: r4(x.rb), Allocation: r4(x.alloc), Selection: r4(x.sel), Interaction: r4(x.inter), Total: r4(x.total) })));

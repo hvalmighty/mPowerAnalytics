@@ -400,3 +400,27 @@ export function renderHoldings(el, ctx) {
     '<div class="grid1">' + panel('Holdings', `<div class="tbl-wrap"><table><thead><tr><th class="l">Security</th><th class="l">Security Name</th><th>Book Cost in Transaction Currency</th><th>Market Value in Transaction Currency</th><th class="l">Portfolio</th></tr></thead><tbody>${body}<tr class="total"><td class="l">Total (${BASE})</td><td></td><td>${fmt.num(tot.book, 2)}</td><td>${fmt.num(tot.mv, 2)}</td><td></td></tr></tbody></table></div>`,
       'Grouped by asset class as in the mPower report.' + (fx.length ? ` Totals in ${BASE}; ${fx.map((c) => rateQuote(c, ctx.model.fxRates?.[c], BASE)).join('; ')}.` : '')) + '</div>';
 }
+
+// Rebalancing tab: portfolio vs benchmark weights and the orders that align the portfolio to the benchmark.
+export function renderRebalance(el, ctx) {
+  const R = ctx.rebal;
+  if (!R) { el.innerHTML = `<div class="msg warn">Rebalancing needs a benchmark with constituents. This portfolio has none.</div>`; return; }
+  const money = (x) => fmt.php(x, 0);
+  const kpis = `<div class="grid4">${kpi('NAV (current)', money(R.nav), 'Valued at the statement market values')}${kpi('Total buys', money(R.totals.buys), `${R.totals.orders} orders in total`)}${kpi('Total sells', money(R.totals.sells), 'Sells fund the buys')}${kpi('Turnover', fmt.pct(R.totals.turnover, 1), 'Buys as a share of NAV')}</div>`;
+  const cols = [
+    { h: 'Security', l: true, f: (x) => esc(x.name) }, { h: 'Ticker', l: true, f: (x) => esc(x.ticker) },
+    { h: 'Ccy', l: true, f: (x) => esc(x.currency) }, { h: 'Country', l: true, f: (x) => esc(x.country) },
+    { h: 'Port. wt', f: (x) => fmt.pct(x.wp, 2) }, { h: 'Bench. wt', f: (x) => fmt.pct(x.wb, 2) },
+    { h: 'Active wt', f: (x) => fmt.pct(x.active, 2), v: (x) => x.active, signed: true },
+    { h: 'Current value', f: (x) => fmt.php(x.mv, 0) }, { h: 'Target value', f: (x) => fmt.php(x.target, 0) },
+    { h: 'Action', l: true, f: (x) => `<b>${x.action}</b>` },
+    { h: 'Order amount', f: (x) => fmt.php(x.amount, 0), v: (x) => x.amount, signed: true },
+    { h: 'Price (local)', f: (x) => (x.localPx != null ? x.localPx.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : '–') },
+    { h: 'Units', f: (x) => (x.units == null ? 'n/a' : x.units.toLocaleString('en-US')), v: (x) => x.units, signed: true },
+    { h: 'Note', l: true, wrap: true, f: (x) => esc(x.note) },
+  ];
+  const total = { name: 'Total', ticker: '', currency: '', country: '', wp: R.rows.reduce((s, r) => s + r.wp, 0), wb: R.rows.reduce((s, r) => s + r.wb, 0), active: 0, mv: R.nav, target: R.rows.reduce((s, r) => s + r.target, 0), action: '', amount: R.totals.net, localPx: null, units: null, note: 'Net of buys and sells is zero (no cash is held).' };
+  const body = table(cols, R.rows.filter((r) => r.action !== 'Hold' || r.note), total);
+  el.innerHTML = kpis + panel('Portfolio vs benchmark — rebalancing orders', body,
+    `Target value = benchmark weight × current NAV, as at ${esc(R.asOf)}. Units are whole units at the statement price. Names with no price data show an amount only. Trading costs, lot sizes and FX moves are not modelled.`);
+}
