@@ -21,7 +21,9 @@ OUT_XLSX = ROOT / "public/data/Portfolio_Arabian.xlsx"
 OUT_JSON = ROOT / "public/data/arabian_data.json"
 OUT_BM = ROOT / "public/data/Benchmark_MSCI_Arabian_IMI.xlsx"
 VAL_DATE = datetime.date(2026, 9, 23)
-START = datetime.date(2025, 9, 23)
+START = datetime.date(2023, 8, 1)          # history start: ~3 years of weekdays, enough for a 500-day lookback + 250-day backtest
+REPORT_START = "2025-09-23"               # performance is reported from here; earlier history is simulated (VaR and backtest only)
+BAND = 0.10                               # holdings stay within +/-10% of their statement price
 HDR_FILL = PatternFill("solid", fgColor="19395C"); HDR_FONT = Font(bold=True, color="FFFFFF")
 
 SECTOR = {
@@ -97,6 +99,20 @@ def main(path):
         if d.weekday() < 5: dates.append(d.isoformat())
         d += datetime.timedelta(days=1)
     n = len(dates)
+    def simulate_bounded(key, anchor_local, sector, fx_rate):
+        """Holdings: a daily random path kept within +/-BAND of the statement price, ending on it."""
+        rng = random.Random(zlib.crc32(("H:" + key).encode()))
+        s = SIGMA.get(sector, 0.24) / math.sqrt(252)
+        lo, hi = anchor_local * (1 - BAND), anchor_local * (1 + BAND)
+        p = [anchor_local * (1 + rng.uniform(-BAND, BAND))]
+        for _ in range(n - 1):
+            x = p[-1] * math.exp(rng.gauss(0, s))
+            while x < lo or x > hi:          # reflect back into the band
+                x = 2 * lo - x if x < lo else 2 * hi - x
+            p.append(x)
+        p[-1] = anchor_local                  # the valuation-date price is the statement price
+        return [round(x * fx_rate, 6) for x in p]   # USD
+
     def simulate(key, anchor_local, sector, fx_rate, drift=0.0):
         rng = random.Random(zlib.crc32(key.encode()))
         s = SIGMA.get(sector, 0.24) / math.sqrt(252)
@@ -109,7 +125,7 @@ def main(path):
     holding_rows = []
     for r in rows:
         sec = SECTOR[r["code"]]
-        series[r["code"]] = simulate(r["code"], r["price"], sec, fx[r["ccy"]])
+        series[r["code"]] = simulate_bounded(r["code"], r["price"], sec, fx[r["ccy"]])
         holding_rows.append(r | {"sector": sec})
 
 
@@ -130,8 +146,8 @@ def main(path):
     series["MSCIAM"] = [round(100 * x, 6) for x in index]
 
     OUT_JSON.write_text(json.dumps({
-        "source": "Holding statement " + path.split("/")[-1] + "; holdings history simulated, anchored to 23-Sep-2026 prices",
-        "base": "USD", "valuationDate": VAL_DATE.isoformat(), "fx": fx,
+        "source": "Holding statement " + path.split("/")[-1] + "; holdings history simulated within +/-10% of statement prices before 2025-09-23 and for the report period (VaR/backtest history)",
+        "base": "USD", "valuationDate": VAL_DATE.isoformat(), "reportStart": REPORT_START, "fx": fx,
         "dates": dates, "series": series,
         "benchmarkAssumptions": {"annualDrift": BENCH_DRIFT, "pricesSimulated": True, "note": "Benchmark prices simulated; no market history available"},
         "benchmark": {"id": "MSCIAM", "name": "MSCI Arabian Markets IMI Index (USD), top-10 constituents with price data",
@@ -191,7 +207,9 @@ def write_benchmark_xlsx(bm, fx, dates, bm_series, index_series):
     ts.column_dimensions["A"].width = 12
     last_r = ts.max_row
     ts.cell(row=last_r + 2, column=1, value="Index return over the period").font = Font(bold=True)
-    ts.cell(row=last_r + 2, column=2, value=f"=B{last_r}/B2-1").number_format = "0.00%"
+    start_row = 2 + dates.index(REPORT_START)
+    ts.cell(row=last_r + 2, column=2, value=f"=B{last_r}/B{start_row}-1").number_format = "0.00%"
+    ts.cell(row=last_r + 3, column=1, value=f"Report period from {REPORT_START}; earlier rows are simulated history for VaR and backtest.")
 
     cur = wb.create_sheet("Currency_Weights")
     cur.append(["Currency", "Benchmark Weight (%)"])

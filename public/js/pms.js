@@ -137,6 +137,7 @@ export function buildModelFromPortfolio(pf, builtin, benchmark = { id: 'PSEI', n
   config.benchmarkSymbol = bmSpec ? bmSpec.id : 'PSEI.PS';
   config.baseCurrency = base;
   config.autoDividends = false;
+  if (builtin.reportStart) config.periodStart = builtin.reportStart; // performance window; earlier history feeds VaR/backtest only
 
   const priceHistory = [], holdings = [];
   for (const l of lines) {
@@ -179,7 +180,7 @@ export function buildModelFromPortfolio(pf, builtin, benchmark = { id: 'PSEI', n
     bm.closes.forEach((v, i) => priceHistory.push({ date: dates[i], ticker: 'PSEI', close: v, adj: null, sim: true }));
   }
 
-  ctx.info.push(`Valued on ${priceRange.max} at the reported market values; holdings treated as unchanged over ${priceRange.min} → ${priceRange.max}.`);
+  ctx.info.push(`Valued on ${priceRange.max} at the reported market values; holdings treated as unchanged over ${config.periodStart} → ${priceRange.max}. Prices before ${config.periodStart} are simulated within ±10% of the statement prices for the VaR lookback and backtest.`);
   const fxUsed = [...new Set(pf.positions.map((p) => p.currency.toUpperCase()).filter((c) => c !== base))];
   if (fxUsed.length) ctx.info.push(`Values in ${base}; ${fxUsed.map((c) => `${c} converted at ${fx[c] ?? 1} ${base} per unit`).join(', ')}.`);
 
